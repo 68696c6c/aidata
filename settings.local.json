@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:linear.app)",
+      "mcp__linear-server__save_issue",
+      "mcp__linear-server__save_milestone"
+    ]
+  }
+}
