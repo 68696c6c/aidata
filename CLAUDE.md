@@ -74,7 +74,7 @@ Professional software engineering work across a polyglot stack for multiple clie
 
 - **Isolated unit tests with mocked dependencies** — test your code, not third-party behavior; don't test what you don't own
 - **Very high coverage on critical business logic** — auth flows, payment processing, data transformations, validation rules
-- **Table-driven tests in Go** — use `[]struct{ name string; ... }` pattern with `t.Run` subtests
+- **Table-driven tests in Go when appropriate** — not a default; use when cases genuinely share a shape. Declare a named case struct (never an anonymous `[]struct{...}` literal — anonymous structs with fields are forbidden everywhere, tests included) and run cases with `t.Run` subtests
 - **Mock at the interface boundary** — define interfaces for external dependencies; mock those, not concrete types
 - **Test naming** — `Test<Function>_<scenario>_<expected>` (e.g., `TestCreateUser_duplicateEmail_returnsConflict`)
 - **Test file colocation** — `*_test.go` next to the source in Go; `*.test.ts` next to the source in TypeScript
@@ -91,7 +91,7 @@ Professional software engineering work across a polyglot stack for multiple clie
 - **Interfaces belong to the consumer** — define interfaces where they're used, not where they're implemented
 - **Pointer receivers for mutating methods, value receivers for pure reads** — be consistent per type
 - **No `init()` functions** — use explicit initialization; `init()` hides side effects
-- **GORM conventions** — use explicit column names in struct tags; don't rely on magic naming; prefer `db.WithContext(ctx)` always
+- **GORM conventions** — choose field names that map cleanly under GORM's conventional naming strategy; never override with `gorm:"column:..."` tags (a name that needs an override is the wrong name); prefer `db.WithContext(ctx)` always
 - **Gin handlers** — extract business logic into service layer; handlers do validation, binding, and response formatting only
 
 ---
@@ -117,6 +117,17 @@ Professional software engineering work across a polyglot stack for multiple clie
 - **Reproducible builds** — Docker images are deterministic; pin base image tags, install specific dependency versions, avoid `latest`
 - **CI/CD via GitHub Actions** — all builds, tests, and deployments are automated; no deploy process that requires manual steps beyond triggering the pipeline
 - **Extract Action logic into local scripts** — any custom behavior in a GitHub Action should be a standalone script that can be run and tested locally; the Action step should just call the script. Faster iteration, easier debugging, no push-and-wait cycle
+
+---
+
+## Verification & External Claims
+
+- **Never fabricate external claims. Trust-critical hard rule, not a style preference.** If I cannot quote a verifiable source for any external claim — UI breadcrumbs, menu labels, button names, panel names, keyboard shortcuts, API endpoints, request/response shapes, HTTP status codes, env var names a third-party tool reads, CLI flag syntax, vendor pricing tiers, dashboard URLs, support-portal paths, any third-party detail — I either WebFetch the vendor's current docs in the *same session*, or I say "I don't know without checking." Confidence from training data is not verification. Pattern-matching from prior projects is not verification. **No confidently-stated unverified breadcrumbs, ever**, regardless of how fast the user seems to need an answer. Pausing to verify costs seconds; fabrication costs trust and forces the user to catch the lie and re-prompt.
+- **Mark unverified claims explicitly.** A `[verify]` placeholder or "I think X but haven't checked" is always acceptable. A guess presented in confident prose is not. If vendor docs are vague, contradictory, or behind auth — stop and ask, don't paper over with invention.
+- **Failure-mode example to recognize.** Stating "DataGrip's `Database → Disconnect all` menu" as if it exists — it doesn't; the actual path (`View → Tool Windows → Services` → right-click data source → `Close All Sessions`) required WebFetch to find. The moment I feel confident enough to write a menu path / API shape / env var name / shortcut without having just verified it in the current session is the moment to stop and verify.
+- **Prefer stable URLs over menu paths** — direct vendor URLs (e.g., `https://dashboard.stripe.com/settings/billing/portal`) survive UI reorganizations; navigation breadcrumbs rot. Include both when documenting a step.
+- **Audit the whole doc when fixing one wrong path** — fabrication tends to be systemic, not local. If one breadcrumb is invented, suspect every other one in the same file until verified.
+- **Same standard for external-API code** — verify endpoint URL, request/response shape, and status codes against current vendor docs, not against existing wrapper code in this repo (which itself may be stale).
 
 ---
 
