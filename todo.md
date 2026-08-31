@@ -12,6 +12,11 @@ found.
 
 ## 1. BLOCKER — `deny()` fails OPEN on model-controlled input
 
+> **FIXED on `feat/subagent-authorization`** (fix(gate) commit): `deny()` now
+> builds its JSON with `jq`; the `\ls` / `\mkdir` / hostile-subagent_type
+> probes below all produce parseable denies and are part of the branch's
+> hermetic tests.
+
 `claude/hooks/approval-gate.sh`. `deny()` documents its own contract:
 
 > `$1` must stay JSON-safe: no double quotes or backslashes.
@@ -142,6 +147,15 @@ neither layer catches it.
 ---
 
 ## 5. Delegation — the three-layer authorization conflict
+
+> **FIXED on `feat/subagent-authorization` except 5.4.** 5.1 (fragment-driven
+> installer with the PILOTFISH_END guard), 5.2 (the fragment, Aaron-approved
+> verbatim 2026-08-31), and 5.3 (the ordering rename) are on the branch. 5.4
+> (adding `reviewer` to the gate's free-spawn list) was BLOCKED by the
+> auto-mode classifier — it permits gate-tightening edits but refuses edits
+> that widen the gate's own permissions, even user-directed — so it remains a
+> two-line HAND EDIT for Aaron: the free list in approval-gate.sh's Agent
+> branch, plus README's "spawn freely" sentence to match.
 
 **Self-contained work order — this has now stalled three sessions.** Most
 recently 2026-08-31, where the main session hand-rolled ~18 reconnaissance
