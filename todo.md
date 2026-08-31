@@ -5,17 +5,27 @@ Findings from the verification pass after the 2026-08-31 install re-run
 live gate bypass, item 5 is the problem that has stalled three sessions, the
 rest is hardening and carried-over plan work.
 
-Verified from a balistiko-rooted session. Nothing below has been fixed — only
-found.
+Verified from a balistiko-rooted session.
+
+**Status 2026-08-31 (later session).** Items 1, 5 and 8 are fixed, merged
+(`2911d67`, PR #3) and verified live. Item 10 is new. Items 2, 3, 4, 6, 7 and 9
+remain open, untouched.
 
 ---
 
 ## 1. BLOCKER — `deny()` fails OPEN on model-controlled input
 
-> **FIXED on `feat/subagent-authorization`** (fix(gate) commit): `deny()` now
-> builds its JSON with `jq`; the `\ls` / `\mkdir` / hostile-subagent_type
-> probes below all produce parseable denies and are part of the branch's
-> hermetic tests.
+> **FIXED — merged `2911d67` (PR #3), commit `39cf068`, installed and verified.**
+> `deny()` builds its JSON with `jq`, live at `claude/hooks/approval-gate.sh:66`.
+> Confirmed 2026-08-31: a backslash-bearing denial came back as valid JSON where
+> it previously failed open. The `\ls` / `\mkdir` / hostile-subagent_type probes
+> are part of the branch's hermetic tests.
+>
+> **Not re-probed on 2026-08-31 (later session).** The backslash probe was
+> attempted and denied *by the redirection rule first* — the probe command
+> carried a `>`. Removing the `>` to get past a denial is the reshaping the gate
+> forbids, so it was not retried. Keep the probe table as a `check.sh`
+> assertion (item 7); an interactive session cannot cleanly exercise it.
 
 `claude/hooks/approval-gate.sh`. `deny()` documents its own contract:
 
@@ -148,13 +158,22 @@ neither layer catches it.
 
 ## 5. Delegation — the three-layer authorization conflict
 
-> **FIXED on `feat/subagent-authorization` — all of item 5.** 5.1
-> (fragment-driven installer with the PILOTFISH_END guard), 5.2 (the fragment,
-> Aaron-approved verbatim 2026-08-31), 5.3 (the ordering rename), and 5.4
-> (`reviewer` in the gate's free-spawn list) are on the branch. 5.4 was
-> authored by Aaron — the auto-mode classifier permits gate-TIGHTENING edits
-> but refuses ones that widen the gate's own permissions, even user-directed —
-> and applied to the branch as his patch; README's spawn list matches.
+> **FIXED — merged `2911d67` (PR #3), installed, and now BEHAVIOURALLY VERIFIED.**
+> 5.1 (fragment-driven installer with the PILOTFISH_END guard, `b88ea0e`), 5.2
+> (the fragment, Aaron-approved verbatim), 5.3 (the ordering rename — both files
+> live in `claude/claude-md.d/` as `10-review-role.md` and
+> `20-subagent-authorization.md`), and 5.4 (`ffc51d5`, live at
+> `approval-gate.sh:81`). 5.4 was authored by Aaron — the auto-mode classifier
+> permits gate-TIGHTENING edits but refuses ones that widen the gate's own
+> permissions, even user-directed — and applied as his patch; README's spawn
+> list matches.
+>
+> **The fix works.** 2026-08-31, later session, first session to load the block
+> from a cold start: the `aidata:subagent-auth` span was present in context at
+> `~/.claude/CLAUDE.md:44-66`, and the session delegated `scout` and `reviewer`
+> unprompted while announcing it was acting on the standing authorization — the
+> 5.2 self-announcement clause firing exactly as designed. Three sessions of
+> silent non-delegation, closed.
 
 **Self-contained work order — this has now stalled three sessions.** Most
 recently 2026-08-31, where the main session hand-rolled ~18 reconnaissance
@@ -409,26 +428,46 @@ applied to aidata's own agent. See also the framing note in item 2.
 
 ### 5.5 Done-criteria
 
-- [ ] `./install.sh` run twice from a clean tree: first run reports the new
-      fragment appended, second run is a **no-op** — `skipped` counters up,
-      `CLAUDE.md` byte-identical (`cmp` it against a copy taken between runs).
-- [ ] `~/.claude/CLAUDE.md` ends up with three spans in order — pilotfish,
-      review-role, subagent-auth — with markers intact and non-overlapping, and
-      the pilotfish span byte-identical to `pilotfish/claude-md-block.md`.
+- [x] `./install.sh` run twice from a clean tree — **verified 2026-08-31.**
+      Run 1: `1 updated / 17 skipped / 0 warned`. Run 2: `0 / 18 / 0`.
+      `CLAUDE.md` byte-identical across runs. `settings.json` untouched, with
+      `effortLevel` and `skipAutoPermissionPrompt` intact.
+- [x] Three spans in order — **verified 2026-08-31.** pilotfish 1–25,
+      `aidata:review-role` 27–42, `aidata:subagent-auth` 44–66; markers intact
+      and non-overlapping; pilotfish span byte-identical to
+      `pilotfish/claude-md-block.md`.
 - [ ] A fragment with a malformed or missing marker produces a `warn` and a
       non-zero exit, and does not modify `CLAUDE.md`.
-- [ ] Spawning `reviewer` from a disarmed session succeeds.
-- [ ] Spawning `executor` from a disarmed session is still denied.
+      **Still untested, deliberately.** It needs a fragment with a knowingly
+      bad marker committed to `claude/claude-md.d/`, and a failed attempt can
+      leave debris that breaks later installs. Belongs in a hermetic test with
+      a temp `CLAUDE_HOME`, not in a live session. See also item 9, which is the
+      same class of hazard.
+- [x] Spawning `reviewer` from a disarmed session succeeds — **verified
+      2026-08-31**, spawned freely from a balistiko-rooted disarmed session.
+- [x] Spawning `executor` from a disarmed session is still denied — **verified
+      2026-08-31.** Denial arrived well-formed and fully parseable
+      (`spawning the write-capable agent type 'executor' requires an armed plan
+      approval`), which is also a live no-regression check on the item-1
+      `deny()` rewrite.
 
 ### 5.6 Traps
 
-- **Run the session from `~/Code/aidata`.** `install.sh` cannot be executed from
-  a gated session in another repo — arming permits Claude's own writes, not
-  arbitrary script execution, and the script is not on the disarmed allowlist.
-- **Item 1 is unfixed.** Until `deny()` is fixed, the disarmed allowlist is
-  advisory: a leading backslash bypasses it. Do not use that to get work done.
+- **Prefer running the session from `~/Code/aidata`** for install work — but
+  the reason previously given here was **wrong and is retracted.** Arming is
+  *not* "Claude's own writes but not arbitrary script execution": the marker
+  check at `approval-gate.sh:55` short-circuits with `exit 0` **before** tool
+  dispatch and before the Bash allowlist, so an armed gate permits any command,
+  `./install.sh` included. Arming is a full bypass for the whole turn, and the
+  Stop hook disarms it at turn end. Run installs from the aidata root because
+  that is where relative paths and `git` state are right, not because the gate
+  forbids it elsewhere.
+- **Item 1 is FIXED** (`39cf068`). The disarmed allowlist is no longer advisory:
+  a leading backslash now produces a parseable deny instead of failing open.
 - **This fix is prose, not enforcement.** It should hold, but it is not
-  guaranteed. The 5.2 self-announcement clause is the only detector.
+  guaranteed. The 5.2 self-announcement clause is the only detector — and on
+  2026-08-31 it fired correctly on the first cold-start session. Keep the clause;
+  it is the only reason non-compliance would ever be noticed.
 
 ---
 
@@ -473,12 +512,23 @@ and this script would have caught three drift findings that prose missed.
 
 Add the item-1 deny-path assertion to it.
 
+**Third finding now points here.** Item 10 needs a fixture table of
+command-string → allow/deny for the splitter, and item 11 needs the same shape
+for the flag guards. Together with the item-1 deny-path probe that is three
+separate asks for the same missing thing: **a way to assert the gate's decisions
+without a live session.** The item-1 probe in particular *cannot* be run
+interactively — attempting it on 2026-08-31 tripped the redirection rule first,
+and stripping the `>` to get past a denial is the reshaping the gate forbids.
+This is no longer a nice-to-have reporter; it is the only place these assertions
+can live.
+
 ---
 
 ## 8. `head -n 0` aborts the install when a managed marker is on line 1
 
-> **FIXED on `feat/subagent-authorization`.** `head_upto N FILE` emits nothing
-> for N<=0 and routes the three `head -n "$((…-1))"` sites through it.
+> **FIXED — merged `2911d67` (PR #3), commit `87477c8`.** `head_upto N FILE`
+> emits nothing for N<=0 and routes the three `head -n "$((…-1))"` sites through
+> it — live at `install.sh:44,48` with call sites at 144, 176 and 225.
 
 Found by the verifier pass on the subagent-auth branch. `head -n "$((begin-1))"`
 becomes `head -n 0` when the marker is on line 1; BSD/macOS `head` errors on
@@ -502,6 +552,186 @@ installer pass:
 - **Duplicate slug across two fragments is last-wins with churning counters.**
   The file converges, but every run reports `linked/updated` for the collision
   and nothing names it.
+
+---
+
+## 10. Quote-blind command splitter denies legitimate reads
+
+Found 2026-08-31 (later session). `claude/hooks/approval-gate.sh:125`:
+
+```bash
+NORMALIZED="$(printf '%s' "$CMD" | sed -E 's/\|\||&&|;|\|/\n/g')"
+```
+
+The splitter is quote-blind, so it splits on `|` **inside a quoted string**.
+`grep -n "a\|b" file` becomes three fragments; the second (`b" file`) has no
+allowlisted leading word and the whole command is denied. Alternation grep — and
+anything else carrying a literal `|`, `;` or `&&` inside quotes — is unusable
+while disarmed.
+
+**This is not a regression, and it is not new.** Every such denial previously
+contained a backslash, produced unparseable JSON, and **failed open**, so the
+command ran anyway and nobody noticed. Fixing `deny()` (item 1) made the gate
+fail closed, which is correct — it just made a pre-existing blind spot visible.
+Fixing item 1 was still right; this is the bill for it.
+
+### REJECTED fix — strip quoted spans before splitting
+
+**Do not apply this. A review pass on 2026-08-31 found it fails OPEN three
+ways**, each verified by patching a scratchpad copy of the hook and running both
+versions against real hook JSON with an unarmed, non-exempt project dir.
+
+```bash
+# REJECTED — fails open, see below
+STRIPPED="$(printf '%s' "$CMD" | sed -E "s/'[^']*'//g; s/\"[^\"]*\"//g")"
+```
+
+**R1 — balanced quotes are the hole, not unbalanced ones.** The two sed passes
+run independently, so the single-quote pass has no notion of double-quote
+context: an apostrophe inside one double-quoted argument pairs with an
+apostrophe in a *later* one, and everything between them is deleted — real
+separators and real commands included.
+
+```
+CMD:      grep "it's" a; rm -rf /tmp/z; grep "won't" b
+STRIPPED: grep  b            ← the rm is gone
+CURRENT:  DENY               PATCHED: ALLOW  (rm -rf /tmp/z executes)
+```
+
+`it's` / `don't` / `won't` in a grep pattern is precisely the traffic this fix
+exists to unblock. The proposal's claimed invariant — "an unbalanced quote leaves
+content in place and fails closed" — is true (verified) but is the wrong
+invariant.
+
+**R2 — `$seg` feeds fourteen downstream flag guards, and stripping weakens all
+of them.** Deleting quoted spans can only *remove* matches, so every guard from
+:142 to :194 gets weaker. Verified flips:
+
+```
+find . "-delete"          CURRENT: DENY   PATCHED: ALLOW
+find . "-exec" rm {} \;   CURRENT: DENY   PATCHED: ALLOW
+```
+
+The architectural miss: the existing sibling pattern `CMD_REDIR_TEST`
+(`approval-gate.sh:115-121`) deliberately confines its normalized copy to a
+**single** `case` test, leaving every other test on raw `$CMD`. The proposal
+widens that normalization to the whole loop.
+
+**R3 — it does change which word is first, in the allow direction.**
+
+```
+"/tmp/evil-"cat file      CURRENT: DENY   PATCHED: ALLOW  (bash runs /tmp/evil-cat)
+'/tmp/evil-'grep x f      CURRENT: DENY   PATCHED: ALLOW  (bash runs /tmp/evil-grep)
+```
+
+Root defect behind all three: **content deletion is not quote removal.** Bash's
+word after quote removal is `/tmp/evil-cat`; the proposal's word after content
+deletion is `cat`, which is allowlisted at :137. The gate would validate a
+different string than the one bash executes.
+
+### The approach that does work — mask, don't delete
+
+- **Mask-and-slice closes R2 and R3.** Replace each quoted span with same-length
+  filler (or just record its offsets), compute the split points from the masked
+  string, then slice the **original `$CMD`** at those offsets. `$seg` then still
+  carries real text for the flag guards and the real first word for the
+  allowlist, while the split itself is quote-aware.
+- **R1 is not fixable with two sed passes at all.** It needs a single
+  left-to-right scan tracking quote state (in-single / in-double / bare) that
+  recognizes separators only in the bare state — roughly 20 lines of `while` over
+  `${CMD:i:1}`. For a gate whose stated posture is fail-closed, that is
+  proportionate; two `s///g` passes are not.
+- **`bash -n` is not an option** — it syntax-checks only and emits no tokens or
+  separator offsets. No stdlib-level bash facility for this was found; treat
+  "use bash's own parser" as unavailable rather than rejected.
+- **Compute the normalization once and feed both halves of the gate.** Today the
+  redirect check (:118) reads raw `$CMD` while the split would read stripped
+  text, so `grep "a>b" f` is denied and `grep "a|b" f` allowed — the same class of
+  quoted metacharacter, two opposite answers in one hook. Fixing only the split
+  guarantees this bug gets refiled against `>` later.
+
+### Non-negotiable before any of this lands
+
+**Build the fixture table first.** This hook has **no tests**:
+`find ~/Code/aidata -name '*approval*'` returns only the script itself. The
+three fail-open flips above fell out of nine hand-built cases in about ten
+minutes; one fixture table would have caught them, and item 1 is the standing
+proof that a plausible-looking gate change can fail open with nothing to notice.
+The reviewer explicitly does **not** consider its own finding set exhaustive and
+expects a fuzzer to find more.
+
+Cases already known to behave correctly, worth keeping as regression anchors:
+escaped quotes (`\"`) and unbalanced quotes both over-deny (fail closed);
+`$'...'` ANSI-C quoting strips correctly; `$(…)` and backticks are unreachable,
+already denied upstream at :118.
+
+### Workaround until fixed
+
+### Workaround until fixed
+
+Use separate `grep` invocations rather than `\|` alternation while disarmed.
+
+---
+
+## 11. Quote-naive flag guards are ALREADY open — verified live
+
+Found by the same 2026-08-31 review pass. **Independent of item 10's fix; these
+are holes in the file as it stands today.** Every guard between
+`approval-gate.sh:141` and `:201` tests for a literal space before the flag
+(`*" -i"*`), and a quote breaks the substring match. Verified ALLOW against the
+**current** hook, unarmed:
+
+```
+git branch "-D" foo         → ALLOW   (bash runs: git branch -D foo)
+sed "-i" s/a/b/ f           → ALLOW   (bash runs: sed -i …)
+curl "-X" POST http://h     → ALLOW   (bash runs: curl -X POST …)
+```
+
+Same root cause as item 10 — quote-naive substring matching against text that
+bash will quote-remove before executing. The guards check a string the shell
+never sees.
+
+**This compounds with items 3 and 4.** `pentagram/balistiko/.claude/settings.local.json`
+pre-approves `Bash(git branch *)`, so the permission prompt is suppressed *and*
+the gate's guard misses: neither layer catches `git branch "-D" main`.
+
+Fix these in the **same pass** as item 10 — a quote-aware normalization that
+yields the real post-quote-removal argument text serves both, and fixing the
+splitter alone would leave these while adding item 10's R2 on top of them.
+
+Full list of guards sharing the defect, all reading `$seg`: `:142` (`sed -i`),
+`:148-151` (`curl -X` / `--data` / `-F` / `-T`), `:154-155` (`curl -o`), `:161`
+(`find -delete` / `-exec`), `:177` (`git branch -D/-d/-m/-M/-f`), `:194`
+(`gh api -X` / `--field` / `--input`).
+
+### Measured friction, 2026-08-31
+
+Five distinct false-positive denials in one session, all on plainly read-only
+commands, all from the redirect/substitution pre-check at `approval-gate.sh:118`
+matching a metacharacter **inside a quoted string**:
+
+| Command shape | Denied because |
+|---|---|
+| `awk 'NR>=36 && NR<=42 {...}' file` | `>` in a comparison operator |
+| `grep -n "func Lookup\|func Units" *.go` | `\|` split the command; fragment two began `func` |
+| `grep -n '```go' README.md` | backtick read as command substitution |
+| `gh pr list --jq '"... -> ..."'` | `>` inside a jq format string |
+| `gh run view --jq '.name + " -> " + .conclusion'` | same |
+
+None of these writes anything. Each cost a retry and a reformulation, and the
+grep case cost a wrong turn — the denial names the *second fragment's* first
+word, so it reads as a nonsense complaint about a word the user never typed.
+
+This is the same root cause as item 10 (quote-blind handling) reaching the
+*over-deny* side rather than the fail-open side, and it is the half that is felt
+every session. Whatever fix lands should be measured against this table.
+
+**Doctrine gap noted in passing:** there is no shell layer in
+`~/.claude/review/` — only `global.md` and `go.md`. Every review of these hooks
+therefore runs on global doctrine alone. Given that aidata is now three findings
+deep in quote/escaping bugs in shell, a `~/.claude/review/shell.md` covering
+quote-removal-vs-substring-matching and fail-closed posture would pay for
+itself.
 
 ---
 
