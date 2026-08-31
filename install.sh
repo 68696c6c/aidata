@@ -14,10 +14,19 @@
 
 set -euo pipefail
 
+# jq is not optional: the user-settings merge below is jq-based, and the
+# approval-gate hooks parse their stdin with jq at every tool call.
+if ! command -v jq >/dev/null 2>&1; then
+  printf '!! jq is not installed. It is required by the hook scripts and by the\n' >&2
+  printf '   settings.json merge. Install it (brew install jq) and re-run.\n' >&2
+  exit 1
+fi
+
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODE="$(dirname "$REPO")"
 CLAUDE_HOME="$HOME/.claude"
 CLAUDE_MD="$CLAUDE_HOME/CLAUDE.md"
+SETTINGS="$CLAUDE_HOME/settings.json"
 
 REVIEW_BEGIN='<!-- aidata:review-role:begin -->'
 REVIEW_END='<!-- aidata:review-role:end -->'
@@ -183,11 +192,106 @@ seed_pilotfish_block() {
   n_seeded=$((n_seeded + 1))
 }
 
+# --- user settings hooks: surgical jq merge ------------------------------------
+#
+# Owns nothing in settings.json. It ADDS four hook entries and never modifies or
+# removes anything already there: an entry is added only when no hook anywhere
+# in the file already carries its exact command string, which is what makes a
+# re-run a no-op.
+#
+# The two gate entries use the hooks EXEC form: because "args" is present the
+# command is executed directly and each args element is passed as one argument
+# with no shell quoting, so ${CLAUDE_PROJECT_DIR} — the project root where the
+# session started — reaches the script as $1 whatever the path contains.
+
+install_user_hooks() {
+  local bell_stop bell_notify gate_pre gate_stop specs base tmp
+
+  bell_stop='afplay /System/Library/Sounds/Glass.aiff 2>/dev/null || true'
+  bell_notify='afplay /System/Library/Sounds/Ping.aiff 2>/dev/null || true'
+  gate_pre="$CLAUDE_HOME/hooks/approval-gate.sh"
+  gate_stop="$CLAUDE_HOME/hooks/disarm-gate.sh"
+
+  specs="$(jq -n \
+    --arg bell_stop "$bell_stop" \
+    --arg bell_notify "$bell_notify" \
+    --arg gate_pre "$gate_pre" \
+    --arg gate_stop "$gate_stop" \
+    '[
+      { event: "Stop", cmd: $bell_stop, entry: {
+          hooks: [ { type: "command", command: $bell_stop, async: true } ] } },
+      { event: "Notification", cmd: $bell_notify, entry: {
+          hooks: [ { type: "command", command: $bell_notify, async: true } ] } },
+      { event: "PreToolUse", cmd: $gate_pre, entry: {
+          matcher: "Agent|Workflow|Write|Edit|NotebookEdit|Bash",
+          hooks: [ { type: "command", command: $gate_pre,
+                     args: ["${CLAUDE_PROJECT_DIR}"], timeout: 15,
+                     statusMessage: "approval gate" } ] } },
+      { event: "Stop", cmd: $gate_stop, entry: {
+          hooks: [ { type: "command", command: $gate_stop,
+                     args: ["${CLAUDE_PROJECT_DIR}"] } ] } }
+    ]')"
+
+  if [ -e "$SETTINGS" ] && [ ! -f "$SETTINGS" ]; then
+    warn "$SETTINGS exists and is not a regular file. Skipping the hooks merge."
+    return 0
+  fi
+
+  if [ -f "$SETTINGS" ]; then
+    if ! jq -e . "$SETTINGS" >/dev/null 2>&1; then
+      warn "$SETTINGS is not valid JSON — NOT touched. Fix it by hand and re-run.
+   check: jq . '$SETTINGS'"
+      return 0
+    fi
+    base="$SETTINGS"
+  else
+    base='/dev/null'
+  fi
+
+  tmp="$(mktemp "$SETTINGS.aidata.XXXXXX")"
+
+  if ! jq --indent 2 -n --argjson specs "$specs" --slurpfile doc "$base" '
+    def hascmd($c): [ .. | objects | select(.command? == $c) ] | length > 0;
+    ($doc[0] // {})
+    | reduce $specs[] as $s (.;
+        if hascmd($s.cmd) then .
+        else .hooks[$s.event] = ((.hooks[$s.event] // []) + [$s.entry])
+        end)
+  ' > "$tmp" 2>/dev/null || ! jq -e . "$tmp" >/dev/null 2>&1; then
+    rm -f "$tmp"
+    warn "the hooks merge for $SETTINGS did not produce valid JSON — file untouched."
+    return 0
+  fi
+
+  if [ -f "$SETTINGS" ] && cmp -s "$tmp" "$SETTINGS"; then
+    rm -f "$tmp"; n_skipped=$((n_skipped + 1)); return 0
+  fi
+
+  # mktemp makes the file 0600; carry the live file's mode across so the merge
+  # does not quietly retighten a config the user reads with other tools.
+  local existed='no' mode
+  if [ -f "$SETTINGS" ]; then
+    existed='yes'
+    mode="$(stat -f '%OLp' "$SETTINGS" 2>/dev/null || echo 644)"
+  else
+    mode=644
+  fi
+  chmod "$mode" "$tmp"
+  mv "$tmp" "$SETTINGS"
+  if [ "$existed" = 'yes' ]; then
+    say "merged   bell + approval-gate hooks into $SETTINGS"
+    n_linked=$((n_linked + 1))
+  else
+    say "created  $SETTINGS (bell + approval-gate hooks)"
+    n_seeded=$((n_seeded + 1))
+  fi
+}
+
 # --- run ----------------------------------------------------------------------
 
 printf 'aidata install — repo: %s\n\n' "$REPO"
 
-mkdir -p "$CODE/.claude" "$CLAUDE_HOME/agents" "$CLAUDE_HOME/review"
+mkdir -p "$CODE/.claude" "$CLAUDE_HOME/agents" "$CLAUDE_HOME/review" "$CLAUDE_HOME/hooks"
 
 printf 'project doctrine\n'
 link_managed "$REPO/CLAUDE.md"            "$CODE/CLAUDE.md"
@@ -198,6 +302,11 @@ link_managed "$REPO/claude/agents/reviewer.md" "$CLAUDE_HOME/agents/reviewer.md"
 link_managed "$REPO/claude/review/global.md"   "$CLAUDE_HOME/review/global.md"
 link_managed "$REPO/claude/review/go.md"       "$CLAUDE_HOME/review/go.md"
 link_managed "$REPO/claude/review/review.sh"   "$CLAUDE_HOME/review/review.sh"
+
+printf '\nhooks\n'
+link_managed "$REPO/claude/hooks/approval-gate.sh" "$CLAUDE_HOME/hooks/approval-gate.sh"
+link_managed "$REPO/claude/hooks/disarm-gate.sh"   "$CLAUDE_HOME/hooks/disarm-gate.sh"
+install_user_hooks
 
 printf '\npilotfish bootstrap\n'
 seed_pilotfish_agents
