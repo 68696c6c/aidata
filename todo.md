@@ -148,14 +148,13 @@ neither layer catches it.
 
 ## 5. Delegation — the three-layer authorization conflict
 
-> **FIXED on `feat/subagent-authorization` except 5.4.** 5.1 (fragment-driven
-> installer with the PILOTFISH_END guard), 5.2 (the fragment, Aaron-approved
-> verbatim 2026-08-31), and 5.3 (the ordering rename) are on the branch. 5.4
-> (adding `reviewer` to the gate's free-spawn list) was BLOCKED by the
-> auto-mode classifier — it permits gate-tightening edits but refuses edits
-> that widen the gate's own permissions, even user-directed — so it remains a
-> two-line HAND EDIT for Aaron: the free list in approval-gate.sh's Agent
-> branch, plus README's "spawn freely" sentence to match.
+> **FIXED on `feat/subagent-authorization` — all of item 5.** 5.1
+> (fragment-driven installer with the PILOTFISH_END guard), 5.2 (the fragment,
+> Aaron-approved verbatim 2026-08-31), 5.3 (the ordering rename), and 5.4
+> (`reviewer` in the gate's free-spawn list) are on the branch. 5.4 was
+> authored by Aaron — the auto-mode classifier permits gate-TIGHTENING edits
+> but refuses ones that widen the gate's own permissions, even user-directed —
+> and applied to the branch as his patch; README's spawn list matches.
 
 **Self-contained work order — this has now stalled three sessions.** Most
 recently 2026-08-31, where the main session hand-rolled ~18 reconnaissance
@@ -473,6 +472,36 @@ config root. `~/Code/CLAUDE.md` requires "scripts over prose documentation",
 and this script would have caught three drift findings that prose missed.
 
 Add the item-1 deny-path assertion to it.
+
+---
+
+## 8. `head -n 0` aborts the install when a managed marker is on line 1
+
+> **FIXED on `feat/subagent-authorization`.** `head_upto N FILE` emits nothing
+> for N<=0 and routes the three `head -n "$((…-1))"` sites through it.
+
+Found by the verifier pass on the subagent-auth branch. `head -n "$((begin-1))"`
+becomes `head -n 0` when the marker is on line 1; BSD/macOS `head` errors on
+that, and under `set -euo pipefail` the whole install aborts silently — no
+`warn`, no summary, the `global CLAUDE.md` phase never runs. Pre-existing on
+`main` (4 of 5 line-1 layouts already aborted). Neither real machine is exposed
+(both have `<!-- pilotfish:begin -->` on line 1), but it broke the documented
+"delete the pilotfish span and re-run to re-seed" recovery.
+
+## 9. Fragment marker hygiene — self-inflicted-only, not yet guarded
+
+Also from the verifier pass. None is reachable by a shipped fragment; all need a
+hand-authored bad file. Left as hardening for `check.sh` (item 7) or a future
+installer pass:
+
+- **Slug mismatch not validated.** A fragment beginning `aidata:x:begin` and
+  ending `aidata:y:end` passes both shape checks and installs silently.
+- **End-marker slug collision jams the second run.** A fragment whose end marker
+  duplicates an earlier fragment's slug makes run 2 warn "begin marker with no
+  matching end marker" (grep finds the earlier end first).
+- **Duplicate slug across two fragments is last-wins with churning counters.**
+  The file converges, but every run reports `linked/updated` for the collision
+  and nothing names it.
 
 ---
 

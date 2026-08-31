@@ -74,11 +74,11 @@ case "$TOOL" in
   # calls pass the agent_id early-allow above, so a turn ending (and
   # disarming) never strands a running agent. Read-only roles spawn freely —
   # verifier is included because its in-place experiments are always
-  # reverted. Unknown or unset types fail CLOSED to the gated side.
+  # reverted and reviewer is read-and-run by contract. Unknown or unset types fail CLOSED to the gated side.
   Agent)
     SUBAGENT_TYPE="$(printf '%s' "$INPUT" | jq -r '.tool_input.subagent_type // empty')"
     case "$SUBAGENT_TYPE" in
-      scout | Explore | verifier)
+      scout | Explore | verifier | reviewer)
         exit 0
         ;;
     esac

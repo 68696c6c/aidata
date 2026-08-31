@@ -41,6 +41,15 @@ n_linked=0; n_seeded=0; n_skipped=0; n_warned=0
 say()  { printf '  %s\n' "$*"; }
 warn() { printf '\n!! %s\n' "$*" >&2; n_warned=$((n_warned + 1)); }
 
+# head_upto N FILE — the first N lines, and NOTHING for N<=0. BSD/macOS `head`
+# errors on `-n 0` ("illegal line count"), which under `set -e` aborts the whole
+# install; that case is real whenever a managed marker sits on line 1 (e.g. a
+# CLAUDE.md hand-reduced to just an aidata block, then re-seeded).
+head_upto() {
+  [ "$1" -le 0 ] && return 0
+  head -n "$1" "$2"
+}
+
 # --- aidata-owned files: symlink, never clobber ------------------------------
 
 link_managed() {
@@ -132,7 +141,7 @@ install_md_fragment() {
    Refusing to guess where the block stops. Fix the markers by hand."
       rm -f "$tmp"; return 0
     fi
-    head -n "$((begin - 1))" "$CLAUDE_MD" > "$tmp"
+    head_upto "$((begin - 1))" "$CLAUDE_MD" > "$tmp"
     cat "$frag" >> "$tmp"
     tail -n +"$((end + 1))" "$CLAUDE_MD" >> "$tmp"
     if cmp -s "$tmp" "$CLAUDE_MD"; then
@@ -164,7 +173,7 @@ install_md_fragment() {
   if [ -n "$h_line" ]; then
     next_h="$(tail -n +"$((h_line + 1))" "$CLAUDE_MD" | grep -n '^## ' | head -1 | cut -d: -f1 || true)"
     if [ -n "$next_h" ]; then stop="$((h_line + next_h - 1))"; else stop="$total"; fi
-    head -n "$((h_line - 1))" "$CLAUDE_MD" > "$tmp"
+    head_upto "$((h_line - 1))" "$CLAUDE_MD" > "$tmp"
     tail -n +"$((stop + 1))" "$CLAUDE_MD" >> "$tmp"
     # Trim trailing blank lines so the appended block sits exactly one clear.
     printf '%s\n' "$(cat "$tmp")" > "$tmp.trim" && mv "$tmp.trim" "$tmp"
@@ -213,7 +222,7 @@ seed_pilotfish_block() {
   # The snapshot goes BEFORE the first aidata block, whichever fragment that
   # is — the aidata blocks read as its sequel.
   if [ -n "$begin" ]; then
-    head -n "$((begin - 1))" "$CLAUDE_MD" > "$tmp"
+    head_upto "$((begin - 1))" "$CLAUDE_MD" > "$tmp"
     cat "$PILOTFISH_BLOCK" >> "$tmp"
     printf '\n' >> "$tmp"
     tail -n +"$begin" "$CLAUDE_MD" >> "$tmp"
