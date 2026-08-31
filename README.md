@@ -88,7 +88,8 @@ The `Stop` hook (`disarm-gate.sh`) removes the marker when the turn ends, so an
 approval never outlives the turn it was given for. While disarmed, `Write` /
 `Edit` / `NotebookEdit` are denied outside `~/.claude/projects/*/memory/*`,
 `Workflow` is denied, spawning a write-capable agent type is denied (`scout`,
-`Explore`, and `verifier` spawn freely), and `Bash` is limited to a read-only
+`Explore`, `verifier`, and `reviewer` — the roles trusted not to leave lasting
+changes — spawn freely), and `Bash` is limited to a read-only
 allowlist of simple commands — anything unrecognized is denied. Subagents' own
 tool calls are ungated: the approval is spent at the spawn, so a running agent
 never depends on the main thread staying open.
