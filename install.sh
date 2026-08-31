@@ -28,18 +28,27 @@ CLAUDE_HOME="$HOME/.claude"
 CLAUDE_MD="$CLAUDE_HOME/CLAUDE.md"
 SETTINGS="$CLAUDE_HOME/settings.json"
 
-REVIEW_BEGIN='<!-- aidata:review-role:begin -->'
-REVIEW_END='<!-- aidata:review-role:end -->'
-REVIEW_HEADING='## Review role (local, not pilotfish-managed)'
 PILOTFISH_BEGIN='<!-- pilotfish:begin -->'
+PILOTFISH_END='<!-- pilotfish:end -->'
 
-REVIEW_BLOCK="$REPO/claude/claude-md.d/review-role.md"
+# Any fragment's begin marker, first line of each claude-md.d/*.md file.
+AIDATA_MARKER_RE='^<!-- aidata:[a-z0-9-]+:begin -->$'
+
 PILOTFISH_BLOCK="$REPO/pilotfish/claude-md-block.md"
 
 n_linked=0; n_seeded=0; n_skipped=0; n_warned=0
 
 say()  { printf '  %s\n' "$*"; }
 warn() { printf '\n!! %s\n' "$*" >&2; n_warned=$((n_warned + 1)); }
+
+# head_upto N FILE — the first N lines, and NOTHING for N<=0. BSD/macOS `head`
+# errors on `-n 0` ("illegal line count"), which under `set -e` aborts the whole
+# install; that case is real whenever a managed marker sits on line 1 (e.g. a
+# CLAUDE.md hand-reduced to just an aidata block, then re-seeded).
+head_upto() {
+  [ "$1" -le 0 ] && return 0
+  head -n "$1" "$2"
+}
 
 # --- aidata-owned files: symlink, never clobber ------------------------------
 
@@ -79,64 +88,99 @@ link_managed() {
   n_linked=$((n_linked + 1))
 }
 
-# --- CLAUDE.md managed block -------------------------------------------------
+# --- CLAUDE.md managed blocks --------------------------------------------------
 #
-# Owns ONLY the span between the aidata markers. Anything between the pilotfish
-# markers is off limits — this never reads or writes past its own delimiters.
+# Every claude/claude-md.d/*.md file is a self-describing fragment: its first
+# line is its own '<!-- aidata:<slug>:begin -->' marker and its last line the
+# matching end marker, and fragments apply in lexical filename order (which is
+# why the files carry number prefixes — later blocks may refer to earlier
+# ones). Each install owns ONLY the span between its fragment's markers.
+# Anything between the pilotfish markers is off limits — the guard below makes
+# that a checked property rather than an accident of heading names.
 
-install_review_block() {
-  local tmp; tmp="$(mktemp)"
+install_md_blocks() {
+  local frag
 
-  # Fresh machine: build the file from both snapshots, pilotfish first.
+  # Fresh machine: seed the pilotfish snapshot, then let every fragment append
+  # through the normal path below.
   if [ ! -f "$CLAUDE_MD" ]; then
-    cat "$PILOTFISH_BLOCK" > "$tmp"
-    printf '\n' >> "$tmp"
-    cat "$REVIEW_BLOCK" >> "$tmp"
-    mv "$tmp" "$CLAUDE_MD"
-    say "created  $CLAUDE_MD (pilotfish snapshot + review-role block)"
+    cat "$PILOTFISH_BLOCK" > "$CLAUDE_MD"
+    say "created  $CLAUDE_MD (pilotfish snapshot)"
     n_seeded=$((n_seeded + 1))
-    return 0
   fi
 
-  local total begin end
+  for frag in "$REPO"/claude/claude-md.d/*.md; do
+    [ -f "$frag" ] || continue
+    install_md_fragment "$frag"
+  done
+}
+
+install_md_fragment() {
+  local frag="$1"
+  local begin_marker end_marker heading h_line tmp total begin end next_h stop
+  local pf_begin pf_end
+
+  begin_marker="$(head -1 "$frag")"
+  end_marker="$(tail -1 "$frag")"
+  case "$begin_marker" in '<!-- aidata:'*':begin -->') : ;;
+    *) warn "$frag does not begin with an aidata marker — skipping."; return 0 ;;
+  esac
+  case "$end_marker" in '<!-- aidata:'*':end -->') : ;;
+    *) warn "$frag does not end with an aidata marker — skipping."; return 0 ;;
+  esac
+
+  tmp="$(mktemp)"
   total="$(wc -l < "$CLAUDE_MD" | tr -d ' ')"
-  begin="$(grep -n -F -x "$REVIEW_BEGIN" "$CLAUDE_MD" | head -1 | cut -d: -f1 || true)"
-  end="$(grep -n -F -x "$REVIEW_END" "$CLAUDE_MD" | head -1 | cut -d: -f1 || true)"
+  begin="$(grep -n -F -x "$begin_marker" "$CLAUDE_MD" | head -1 | cut -d: -f1 || true)"
+  end="$(grep -n -F -x "$end_marker" "$CLAUDE_MD" | head -1 | cut -d: -f1 || true)"
 
   # Already marked: replace the span in place, inclusive of both markers.
   if [ -n "$begin" ]; then
     if [ -z "$end" ] || [ "$end" -lt "$begin" ]; then
-      warn "$CLAUDE_MD has an aidata begin marker with no matching end marker.
+      warn "$CLAUDE_MD has $begin_marker with no matching end marker.
    Refusing to guess where the block stops. Fix the markers by hand."
       rm -f "$tmp"; return 0
     fi
-    head -n "$((begin - 1))" "$CLAUDE_MD" > "$tmp"
-    cat "$REVIEW_BLOCK" >> "$tmp"
+    head_upto "$((begin - 1))" "$CLAUDE_MD" > "$tmp"
+    cat "$frag" >> "$tmp"
     tail -n +"$((end + 1))" "$CLAUDE_MD" >> "$tmp"
     if cmp -s "$tmp" "$CLAUDE_MD"; then
       rm -f "$tmp"; n_skipped=$((n_skipped + 1)); return 0
     fi
     cat "$tmp" > "$CLAUDE_MD"; rm -f "$tmp"
-    say "updated  review-role block in $CLAUDE_MD"
+    say "updated  $(basename "$frag" .md) block in $CLAUDE_MD"
     n_linked=$((n_linked + 1))
     return 0
   fi
 
-  # MIGRATION: the section predates the markers. Cut the unmarked section out
-  # before appending, or the append would duplicate the heading.
-  local heading next_h stop
-  heading="$(grep -n -F -x "$REVIEW_HEADING" "$CLAUDE_MD" | head -1 | cut -d: -f1 || true)"
-  if [ -n "$heading" ]; then
-    next_h="$(tail -n +"$((heading + 1))" "$CLAUDE_MD" | grep -n '^## ' | head -1 | cut -d: -f1 || true)"
-    if [ -n "$next_h" ]; then stop="$((heading + next_h - 1))"; else stop="$total"; fi
-    head -n "$((heading - 1))" "$CLAUDE_MD" > "$tmp"
+  # MIGRATION: the section predates the markers. Its heading is the fragment's
+  # first '## ' line; cut the unmarked section out before appending, or the
+  # append would duplicate it.
+  heading="$(grep -m1 '^## ' "$frag" || true)"
+  h_line=''
+  [ -n "$heading" ] && h_line="$(grep -n -F -x "$heading" "$CLAUDE_MD" | head -1 | cut -d: -f1 || true)"
+
+  # Never migrate a heading living inside the pilotfish span — upstream-owned.
+  # Without this, a fragment headed like one of pilotfish's own sections would
+  # cut upstream's text out of the file.
+  pf_begin="$(grep -n -F -x "$PILOTFISH_BEGIN" "$CLAUDE_MD" | head -1 | cut -d: -f1 || true)"
+  pf_end="$(grep -n -F -x "$PILOTFISH_END" "$CLAUDE_MD" | head -1 | cut -d: -f1 || true)"
+  if [ -n "$h_line" ] && [ -n "$pf_begin" ] && [ -n "$pf_end" ] \
+     && [ "$h_line" -ge "$pf_begin" ] && [ "$h_line" -le "$pf_end" ]; then
+    h_line=''
+  fi
+
+  if [ -n "$h_line" ]; then
+    next_h="$(tail -n +"$((h_line + 1))" "$CLAUDE_MD" | grep -n '^## ' | head -1 | cut -d: -f1 || true)"
+    if [ -n "$next_h" ]; then stop="$((h_line + next_h - 1))"; else stop="$total"; fi
+    head_upto "$((h_line - 1))" "$CLAUDE_MD" > "$tmp"
     tail -n +"$((stop + 1))" "$CLAUDE_MD" >> "$tmp"
     # Trim trailing blank lines so the appended block sits exactly one clear.
     printf '%s\n' "$(cat "$tmp")" > "$tmp.trim" && mv "$tmp.trim" "$tmp"
     printf '\n' >> "$tmp"
-    cat "$REVIEW_BLOCK" >> "$tmp"
+    cat "$frag" >> "$tmp"
     cat "$tmp" > "$CLAUDE_MD"; rm -f "$tmp"
-    say "migrated unmarked review-role section into a marker-wrapped block"
+    say "migrated unmarked $(basename "$frag" .md) section into a marked block"
     n_linked=$((n_linked + 1))
     return 0
   fi
@@ -144,9 +188,9 @@ install_review_block() {
   # Absent entirely: append.
   cp "$CLAUDE_MD" "$tmp"
   printf '\n' >> "$tmp"
-  cat "$REVIEW_BLOCK" >> "$tmp"
+  cat "$frag" >> "$tmp"
   cat "$tmp" > "$CLAUDE_MD"; rm -f "$tmp"
-  say "appended review-role block to $CLAUDE_MD"
+  say "appended $(basename "$frag" .md) block to $CLAUDE_MD"
   n_linked=$((n_linked + 1))
 }
 
@@ -173,11 +217,12 @@ seed_pilotfish_block() {
   fi
 
   local tmp begin; tmp="$(mktemp)"
-  begin="$(grep -n -F -x "$REVIEW_BEGIN" "$CLAUDE_MD" | head -1 | cut -d: -f1 || true)"
+  begin="$(grep -n -E "$AIDATA_MARKER_RE" "$CLAUDE_MD" | head -1 | cut -d: -f1 || true)"
 
-  # The snapshot goes BEFORE the review-role block, which reads as its sequel.
+  # The snapshot goes BEFORE the first aidata block, whichever fragment that
+  # is — the aidata blocks read as its sequel.
   if [ -n "$begin" ]; then
-    head -n "$((begin - 1))" "$CLAUDE_MD" > "$tmp"
+    head_upto "$((begin - 1))" "$CLAUDE_MD" > "$tmp"
     cat "$PILOTFISH_BLOCK" >> "$tmp"
     printf '\n' >> "$tmp"
     tail -n +"$begin" "$CLAUDE_MD" >> "$tmp"
@@ -313,7 +358,7 @@ seed_pilotfish_agents
 seed_pilotfish_block
 
 printf '\nglobal CLAUDE.md\n'
-install_review_block
+install_md_blocks
 
 printf '\n%s\n' '----------------------------------------'
 printf 'linked/updated %d · seeded %d · skipped %d · warned %d\n' \

@@ -20,7 +20,7 @@ Hand-rolled shell and symlinks. No Dotbot, no framework, no dependencies beyond
 | `claude/review/review.sh` | `~/.claude/review/review.sh` | link |
 | `claude/hooks/approval-gate.sh` | `~/.claude/hooks/approval-gate.sh` | link |
 | `claude/hooks/disarm-gate.sh` | `~/.claude/hooks/disarm-gate.sh` | link |
-| `claude/claude-md.d/review-role.md` | `~/.claude/CLAUDE.md` | block |
+| `claude/claude-md.d/*.md` (each) | `~/.claude/CLAUDE.md` | block |
 | (four hook entries) | `~/.claude/settings.json` | merge |
 | `pilotfish/agents/*.md` (6) | `~/.claude/agents/*.md` | seed |
 | `pilotfish/claude-md-block.md` | `~/.claude/CLAUDE.md` | seed |
@@ -30,9 +30,12 @@ Four mechanisms, four different ownership rules:
 - **link** — symlink into the repo. The repo owns it. Edit either path; it is
   one file on disk.
 - **block** — a marker-delimited span inside a file aidata does not otherwise
-  own. `install.sh` rewrites only what is between
-  `<!-- aidata:review-role:begin -->` and `<!-- aidata:review-role:end -->`, and
-  never reads or writes inside the pilotfish markers.
+  own. Every `claude/claude-md.d/*.md` file is a self-describing fragment: its
+  first and last lines are its own `<!-- aidata:<slug>:begin/end -->` markers,
+  fragments apply in lexical filename order (hence the number prefixes), and
+  `install.sh` rewrites only what lies between each fragment's markers — never
+  inside the pilotfish span, which is guarded explicitly. Adding a block is
+  dropping a file in the directory; no installer edit.
 - **merge** — an addition to a file aidata does not own. Each hook entry is
   added only when no hook anywhere in `settings.json` already carries its exact
   command string, so nothing existing is ever modified or removed and a re-run
@@ -85,7 +88,8 @@ The `Stop` hook (`disarm-gate.sh`) removes the marker when the turn ends, so an
 approval never outlives the turn it was given for. While disarmed, `Write` /
 `Edit` / `NotebookEdit` are denied outside `~/.claude/projects/*/memory/*`,
 `Workflow` is denied, spawning a write-capable agent type is denied (`scout`,
-`Explore`, and `verifier` spawn freely), and `Bash` is limited to a read-only
+`Explore`, `verifier`, and `reviewer` — the roles trusted not to leave lasting
+changes — spawn freely), and `Bash` is limited to a read-only
 allowlist of simple commands — anything unrecognized is denied. Subagents' own
 tool calls are ungated: the approval is spent at the spawn, so a running agent
 never depends on the main thread staying open.
@@ -115,7 +119,7 @@ cd ~/Code/aidata && git add claude/review/go.md && git commit
 ```
 
 The one file that is *not* a symlink is `~/.claude/CLAUDE.md`. To change the
-review-role section, edit **`claude/claude-md.d/review-role.md`** in the repo and
+review-role section, edit **`claude/claude-md.d/10-review-role.md`** in the repo and
 re-run `./install.sh` — editing the live file directly works until the next
 install, which overwrites the block. Keep the markers as the first and last
 lines.

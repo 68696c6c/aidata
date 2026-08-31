@@ -59,8 +59,12 @@ fi
 TOOL="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')"
 
 deny() {
-  # $1 must stay JSON-safe: no double quotes or backslashes.
-  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"APPROVAL GATE (disarmed): %s. Present the plan and ask Aaron to arm the gate with: ! touch .claude/plan-approved — it disarms when the turn ends. Do not reshape the call to bypass the gate."}}' "$1"
+  # Built with jq, never printf: $1 carries model-controlled text (a command's
+  # first word, a subagent_type), and hand-rolled JSON around it fails OPEN —
+  # a bare backslash makes the output unparseable and the harness then ALLOWS
+  # the call (found live 2026-08-31: '\mkdir x' sailed through the allowlist).
+  jq -cn --arg r "APPROVAL GATE (disarmed): $1. Present the plan and ask Aaron to arm the gate with: ! touch .claude/plan-approved — it disarms when the turn ends. Do not reshape the call to bypass the gate." \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
   exit 0
 }
 
@@ -70,11 +74,11 @@ case "$TOOL" in
   # calls pass the agent_id early-allow above, so a turn ending (and
   # disarming) never strands a running agent. Read-only roles spawn freely —
   # verifier is included because its in-place experiments are always
-  # reverted. Unknown or unset types fail CLOSED to the gated side.
+  # reverted and reviewer is read-and-run by contract. Unknown or unset types fail CLOSED to the gated side.
   Agent)
     SUBAGENT_TYPE="$(printf '%s' "$INPUT" | jq -r '.tool_input.subagent_type // empty')"
     case "$SUBAGENT_TYPE" in
-      scout | Explore | verifier)
+      scout | Explore | verifier | reviewer)
         exit 0
         ;;
     esac
