@@ -109,6 +109,21 @@ different from the written example is still a violation.
   value is that a test now catches something, the test must be shown failing
   without the fix and passing with it. A test that passes in both states pins
   nothing.
+- **Mutate toward wrongness, not only absence.** Deleting an entry and watching
+  the test fail proves that *absence* is caught, and says nothing about a wrong
+  value — a different mutation, and the one that survives. A guard whose comment
+  claims it catches a wrong value has to be proved against a wrong value. The
+  recurring shape is a test that compares membership where the claim is about
+  values: a table keyed by a name unconnected to the thing its case actually
+  builds, or a ladder checked by the set of entries it can select rather than by
+  the factors behind them. Read what the comment promises, work out which
+  mutation would violate it, and run that one.
+- **A test whose fixture guarantees the property cannot test it.** Before
+  trusting a green sweep, ask what its fixture makes impossible. One rendering
+  test fed every value through a policy naming that value's own unit — the
+  configuration in which the search it was checking succeeds by construction. It
+  passed for every case and could not have failed for any, and the arrangement
+  that mattered was the one the case set excluded.
 - Passing tests are the floor, never the proof. A change verified only by unit
   tests is reported as "unit tests pass," never as "works."
 
@@ -171,6 +186,16 @@ not it works.
   as a noun, `-ise` and `-isation` generally. **Do not flag them in untouched
   lines.** Existing corpora are swept deliberately or not at all, and a review
   that reports every legacy occurrence buries its own findings.
+- **No unexported identifier in a consumer-facing error message.** A consumer
+  cannot look up what they cannot see, so a message naming an internal function
+  or struct tells them nothing and dates badly. Two mechanisms leak one by
+  accident and are worth looking for specifically: handing an unexported type to
+  a decoder or serializer that names the type it failed on, and an operation
+  field filled in with the unexported function that happened to detect the
+  failure rather than the exported call the caller made. **Read the messages**
+  rather than only checking the types — a test asserting that `errors.As` reaches
+  the right type pins nothing about what the message says, so a leak survives
+  every green run.
 - **No vendor names in exposed surfaces** — not in URLs, table or column names,
   controller or middleware identities, or API field names. The vendor adapter
   package is where the vendor name belongs. The one exception is a URL
