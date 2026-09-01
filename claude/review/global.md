@@ -161,6 +161,16 @@ not it works.
   the type and domain it holds. After a rename, EVERY identifier, log string,
   and error string uses the new vocabulary — stale vocabulary surviving a
   rename is a finding.
+- **US English spelling in code, identifiers, comments, docs, and commit
+  messages.** Not a style preference — a consistency rule of the same class as
+  the rename above. A codebase carrying both `normalise` and `normalize` cannot
+  be searched reliably, and the split reaches identifiers, not just prose. US
+  spelling also matches the ecosystem the code sits beside: `Marshaler`,
+  `Analyzer`, `encoding/json`. Flag British forms **introduced in the diff** —
+  `behaviour`, `normalise`, `factorisation`, `initialise`, `colour`, `licence`
+  as a noun, `-ise` and `-isation` generally. **Do not flag them in untouched
+  lines.** Existing corpora are swept deliberately or not at all, and a review
+  that reports every legacy occurrence buries its own findings.
 - **No vendor names in exposed surfaces** — not in URLs, table or column names,
   controller or middleware identities, or API field names. The vendor adapter
   package is where the vendor name belongs. The one exception is a URL
