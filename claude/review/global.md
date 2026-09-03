@@ -186,6 +186,13 @@ not it works.
   as a noun, `-ise` and `-isation` generally. **Do not flag them in untouched
   lines.** Existing corpora are swept deliberately or not at all, and a review
   that reports every legacy occurrence buries its own findings.
+- **No em-dashes in prose introduced in the diff.** User-facing copy, docs,
+  comments, commit messages, and PR bodies use a comma, a colon, or
+  parentheses where an em-dash (U+2014) would go. Team convention, enforced the
+  same way as the spelling rule above: grep the diff's added lines for
+  `\x{2014}` and resolve every hit; a hit that is data rather than prose (a
+  fixture quoting third-party text) is justified in the report, not skipped.
+  **Do not flag em-dashes in untouched lines.**
 - **No unexported identifier in a consumer-facing error message.** A consumer
   cannot look up what they cannot see, so a message naming an internal function
   or struct tells them nothing and dates badly. Two mechanisms leak one by
