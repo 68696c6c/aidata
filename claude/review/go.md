@@ -185,7 +185,11 @@ severities and the output contract come from there.
   a failed setup stops rather than producing a nil-deref three lines later.
 - **No helpers that hide assertions.** Helpers set up; assertions stay visible
   in the test body.
-- **`*_test.go` colocated with the source.**
+- **One test file per source file, named for it**: tests for `foo.go` live in
+  `foo_test.go` in the same package. A verb- or feature-named test file holding
+  tests for several source files is a finding. Shared fakes live in the
+  package's single test-support file (`fakes_test.go`, or the one the package
+  already has), never in another source file's test file.
 - Test files are held to the same style rules as production code — anonymous
   case structs and swallowed errors are findings in tests too.
 
@@ -217,3 +221,6 @@ sweep the whole diff for the same shape.
 - Duplicate declarations: for every `const`/`var` the diff ADDS, grep the whole
   repo for the same name and the same literal value. A second declaration
   anywhere is a finding.
+- For every `*_test.go` the diff adds or modifies, a sibling `<name>.go` must
+  exist in the same directory; allowlist `setup_test.go`, `fakes_test.go`,
+  `helpers_test.go`, `main_test.go`.
