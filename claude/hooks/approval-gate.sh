@@ -14,12 +14,25 @@
 # are ungated (agent_id early-allow below); launching a write-capable agent
 # type requires the armed marker (Agent branch below). While armed, the main
 # session may also perform its own mutating work in that turn (shipping ops:
-# push, PR, rerun, rebases) — the hybrid ruling. Running agents no longer
-# depend on the main thread staying open.
+# push, PR, rerun, rebases) — the hybrid ruling, SUPERSEDED on 2026-09-08 by
+# the orchestrator-only ruling below; it is kept here as history, not as
+# current behavior. Running agents no longer depend on the main thread
+# staying open.
 #
 # 2026-08-31 (Aaron): the gate is user-global by default, with a per-repo
 # opt-out — a repo whose root holds .claude/no-approval-gate is exempt and the
 # gate returns without deciding anything, allow or deny.
+#
+# 2026-09-08 (Aaron): the main session is the ORCHESTRATOR ONLY. It never
+# edits a file and it never changes a git working tree or git history, armed
+# or not. This supersedes the hybrid clause above. Arming still authorizes
+# exactly two things: spawning write-capable agents, and shipping or
+# orchestration operations that touch no tree (git push, git fetch, gh,
+# docker, docker compose, make, op, aws, curl, process control). Editing is
+# delegated: the main session spawns an executor and hands it the spec. The
+# orchestrator-only checks therefore run BEFORE the armed early-allow, so the
+# marker cannot lift them, and they carry their own denial message because
+# arming is not the remedy for them.
 #
 # The gate enforces plan approval before CHANGES and nothing else — reading
 # is never gated (Aaron, 2026-08-13). Fail-closed on the write side: while
@@ -52,10 +65,6 @@ if [ -n "$AGENT_ID" ]; then
   exit 0
 fi
 
-if [ -f "$MARKER" ]; then
-  exit 0
-fi
-
 TOOL="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')"
 
 deny() {
@@ -67,6 +76,260 @@ deny() {
     '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
   exit 0
 }
+
+deny_orchestrator() {
+  # Same jq construction and the same fail-open reasoning as deny(), with a
+  # different message on purpose (Aaron, 2026-09-08): arming does not lift an
+  # orchestrator-only denial, so telling the model to ask for the marker would
+  # be wrong advice. The remedy is delegation.
+  jq -cn --arg r "ORCHESTRATOR ONLY: the main session does not edit files. Spawn an executor (mech-executor for a fully specified change, executor when judgment is needed) and give it the exact spec. Blocked here: $1." \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
+  exit 0
+}
+
+# The only places the main session writes for itself: its own memory directory
+# (handled at the Write branch) and the per-session scratchpad. The uid segment
+# is Aaron's 501 today, so claude-* keeps the rule working if the uid changes.
+# A case glob spans slashes, which is what lets one * cover the project and
+# session segments; that same property is why a path holding .. is refused
+# outright rather than resolved.
+is_scratchpad_path() {
+  case "$1" in
+    *..*) return 1 ;;
+    /private/tmp/claude-*/*/scratchpad | /private/tmp/claude-*/*/scratchpad/*) return 0 ;;
+    /tmp/claude-*/*/scratchpad | /tmp/claude-*/*/scratchpad/*) return 0 ;;
+  esac
+  return 1
+}
+
+# Redirect targets and the path arguments of cp/mv/rm-style commands may point
+# anywhere in /tmp, which is scratch by construction and subsumes the
+# scratchpad prefixes above. /private/tmp is the same directory as /tmp on
+# macOS (/tmp is a symlink to it), so both spellings carry the same
+# permission. Everything else, a relative path included, is outside.
+is_bash_write_path() {
+  case "$1" in
+    *..*) return 1 ;;
+    /tmp/* | /private/tmp/*) return 0 ;;
+  esac
+  return 1
+}
+
+# A redirection writes a file unless its target is scratch space or /dev/null.
+# Descriptor moves (2>&1, >&2, 1>&2) move a fd and write nothing. A target
+# that cannot be resolved to an allowed prefix fails CLOSED, including a
+# target hidden inside quotes, which the disarmed allowlist below already
+# refuses for the same reason.
+check_redirects() {
+  local tok target
+  while [ "$#" -gt 0 ]; do
+    tok="$1"
+    shift
+    case "$tok" in
+      *'>'*) ;;
+      *) continue ;;
+    esac
+    case "$tok" in
+      '>&'[0-9] | [0-9]'>&'[0-9] | '&>&'[0-9]) continue ;;
+    esac
+    target="${tok#[0-9]}"
+    target="${target#&}"
+    target="${target#>}"
+    target="${target#>}"
+    target="${target#|}"
+    if [ -z "$target" ]; then
+      target="${1:-}"
+      [ "$#" -gt 0 ] && shift
+    fi
+    case "$target" in
+      /dev/null) continue ;;
+    esac
+    if is_bash_write_path "$target"; then
+      continue
+    fi
+    deny_orchestrator "a redirection writing to '${target:-an unreadable target}'"
+  done
+}
+
+# Every path argument of a file-moving command has to land in scratch space.
+# An argument starting with - is a flag; anything else is treated as a path,
+# so a relative path is outside by definition. A mode or owner argument (the
+# 755 of chmod) reads as a relative path here and is refused with it; that is
+# the fail-closed side of the same rule.
+check_path_args() {
+  local name tok prev
+  name="$1"
+  shift
+  prev=""
+  while [ "$#" -gt 0 ]; do
+    tok="$1"
+    shift
+    case "$prev" in
+      *'>')
+        # consumed as the target of a redirection, already checked above
+        prev="$tok"
+        continue
+        ;;
+    esac
+    prev="$tok"
+    case "$tok" in
+      -* | *'>'*) continue ;;
+    esac
+    if is_bash_write_path "$tok"; then
+      continue
+    fi
+    deny_orchestrator "$name with the path '$tok' outside scratch space"
+  done
+}
+
+# `\rm`, "rm" and /bin/rm all run rm, so the command word is normalized before
+# it is compared. A deny list that skips normalization is walked past by a
+# quoting trick, which is the bypass class found live on 2026-08-31 when
+# '\mkdir x' sailed through the allowlist. Sets NORM rather than echoing,
+# because a command substitution would run in a subshell and a denial there
+# could not exit the hook.
+NORM=""
+normalize_word() {
+  NORM="${1//\\/}"
+  NORM="${NORM//\"/}"
+  NORM="${NORM//\'/}"
+  NORM="${NORM##*/}"
+}
+
+# Constructs the orchestrator may never run, checked in the same shape the
+# disarmed allowlist below uses: split the compound on | ; && || and read the
+# leading word(s) of each simple command. Newlines already separate segments,
+# so a heredoc body is examined as its own segment. Substitution boundaries
+# ($( , <( , backtick and the closing paren) split too: `echo $(rm -rf x)`
+# runs rm, so rm has to be read as the leading word of a segment of its own.
+orchestrator_bash_scan() {
+  local normalized seg first sub
+  normalized="$(printf '%s' "$1" | sed -E 's/\|\||&&|;|\||\$\(|<\(|\)|`/\n/g')"
+
+  while IFS= read -r seg; do
+    seg="${seg#"${seg%%[![:space:]]*}"}"
+    [ -z "$seg" ] && continue
+    # shellcheck disable=SC2086
+    check_redirects $seg
+
+    # shellcheck disable=SC2086
+    set -- $seg
+    # A leading command/env/nohup/time/sudo/xargs word or a VAR=value
+    # assignment only prefixes the real command word; step over them to reach
+    # it, so `xargs rm <path>` is read as rm.
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        command | env | nohup | time | sudo | xargs | *=*) shift ;;
+        *) break ;;
+      esac
+    done
+    normalize_word "${1:-}"
+    first="$NORM"
+
+    case "$first" in
+      python | python[0-9]* | perl | ruby | node | nodejs | bun | deno | php)
+        # Any form writes files: a script file, -c, -e, a - stdin script or a
+        # heredoc. The interpreter itself is the construct being refused.
+        deny_orchestrator "the interpreter '$first', which can write files in any form"
+        ;;
+      tee | truncate | dd | install | rsync | patch)
+        deny_orchestrator "the file-writing command '$first'"
+        ;;
+      sed)
+        case "$seg" in
+          *" -i"* | *" --in-place"*) deny_orchestrator "sed in-place editing" ;;
+        esac
+        ;;
+      cp | mv | rm | mkdir | touch | ln | chmod | chown | rmdir)
+        shift
+        check_path_args "$first" "$@"
+        ;;
+      find)
+        # Same rule the disarmed allowlist below already applies to find, for
+        # the same reason: -delete and -exec turn a search into a write.
+        case "$seg" in
+          *-delete* | *-exec*) deny_orchestrator "find with -delete or -exec" ;;
+        esac
+        ;;
+      git)
+        # Skip the global options to find the real subcommand, keeping the
+        # ones that take a value in a separate word paired with it.
+        shift
+        while [ "$#" -gt 0 ]; do
+          case "$1" in
+            -C | -c | --git-dir | --work-tree | --namespace | --exec-path | --config-env)
+              shift 2 || break
+              ;;
+            -*) shift ;;
+            *) break ;;
+          esac
+        done
+        normalize_word "${1:-}"
+        sub="$NORM"
+        case "$sub" in
+          add | commit | cherry-pick | rebase | merge | apply | am | revert | reset | restore | checkout | switch | stash | worktree | pull | tag | rm | mv | clean | init | clone | notes | filter-branch | replace | update-ref | symbolic-ref)
+            deny_orchestrator "git $sub, which changes a working tree or git history"
+            ;;
+          branch)
+            case "$seg" in
+              *" -D"* | *" -d"* | *" -m"* | *" -M"* | *" -f"* | *" --force"* | *" --delete"* | *" --move"*)
+                deny_orchestrator "git branch mutation"
+                ;;
+            esac
+            ;;
+        esac
+        ;;
+    esac
+  done <<EOF_SEGMENTS
+$normalized
+EOF_SEGMENTS
+}
+
+# ---------------------------------------------------------------------------
+# Orchestrator-only enforcement (Aaron, 2026-09-08), ahead of the armed
+# early-allow so the marker cannot lift it. Everything not refused here is
+# left to the marker and, while disarmed, to the read-only allowlist below:
+# git push, git fetch, gh, docker, make, op, aws, curl and process control
+# stay allowed when armed, because shipping is the orchestrator's job.
+#
+# Build tools (pnpm, npm, go, make) stay allowed too, on the grounds that they
+# write only inside node_modules, dist and build caches of a worktree an
+# executor owns. That is a judgment call about blast radius rather than a
+# guarantee, and Aaron may tighten it later; a tightening belongs in the scan
+# below, next to the interpreters.
+# ---------------------------------------------------------------------------
+case "$TOOL" in
+  Write | Edit | NotebookEdit)
+    # Memory is EXEMPT (Aaron, 2026-08-13): remembering is Claude's job, not
+    # plan execution. The session scratchpad is exempt on the same reasoning,
+    # since notes and working files there are not the codebase. Every other
+    # file, armed or not, belongs to an executor.
+    FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')"
+    case "$FILE_PATH" in
+      "$HOME"/.claude/projects/*/memory/*)
+        exit 0
+        ;;
+    esac
+    if is_scratchpad_path "$FILE_PATH"; then
+      exit 0
+    fi
+    deny_orchestrator "$TOOL to ${FILE_PATH:-an unnamed path}"
+    ;;
+  Bash)
+    CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')"
+    # Stderr-only redirects (2>/dev/null, 2>&1) cannot write files, so strip
+    # them once here (Aaron, 2026-08-21: reading is never gated). Both the
+    # orchestrator scan and the disarmed redirection test read the stripped
+    # copy.
+    CMD_REDIR_TEST="${CMD//2>\/dev\/null/}"
+    CMD_REDIR_TEST="${CMD_REDIR_TEST//2>&1/}"
+    orchestrator_bash_scan "$CMD_REDIR_TEST"
+    ;;
+esac
+
+if [ -f "$MARKER" ]; then
+  exit 0
+fi
 
 case "$TOOL" in
   # The unit of approval is the SPAWN (Aaron, 2026-08-20): a write-capable
@@ -89,31 +352,17 @@ case "$TOOL" in
   Workflow)
     deny "$TOOL is execution-class and blocked without an armed plan approval"
     ;;
-  Write | Edit | NotebookEdit)
-    # Memory is EXEMPT (Aaron, 2026-08-13): remembering is Claude's job, not
-    # plan execution — the gate exists to force plan approval, never to add
-    # barriers to memory. Everything else file-shaped stays gated.
-    FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')"
-    case "$FILE_PATH" in
-      "$HOME"/.claude/projects/*/memory/*)
-        exit 0
-        ;;
-    esac
-    deny "$TOOL outside the memory directory is execution-class and blocked without an armed plan approval"
-    ;;
+  # Write, Edit and NotebookEdit are already decided above: the orchestrator
+  # branch allows memory and the scratchpad and refuses every other path,
+  # armed or not, so there is nothing left for the marker to authorize.
   Bash) ;;
   *)
     exit 0
     ;;
 esac
 
-CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')"
-
 # Redirections and substitutions can smuggle writes through read-only tools.
-# Stderr-only redirects (2>/dev/null, 2>&1) cannot write files — strip them
-# before testing (Aaron, 2026-08-21: reading is never gated).
-CMD_REDIR_TEST="${CMD//2>\/dev\/null/}"
-CMD_REDIR_TEST="${CMD_REDIR_TEST//2>&1/}"
+# CMD and its stderr-stripped copy were read in the orchestrator branch above.
 case "$CMD_REDIR_TEST" in
   *'>'* | *'$('* | *'<('* | *'`'*)
     deny "Bash with redirection or substitution is blocked while disarmed (read-only simple commands only)"
