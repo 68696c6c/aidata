@@ -36,8 +36,8 @@
 #
 # 2026-09-08 (Aaron), the PLAN FILE rule: an armed marker alone no longer
 # authorizes a write-capable Agent spawn. The spawn prompt has to name a plan
-# file under $HOME/.claude/plans/<project>/, where <project> is the basename of
-# the project root, and the gate reads that file. It requires all eight
+# file under $HOME/.claude/plans/<project>/, one directory per project (see the
+# follow-up below), and the gate reads that file. It requires all eight
 # sections as `## ` headings (Goal, Out of scope, Design fit, Decisions, New
 # surface, Steps, Verification, Fallback), at least 40 non-whitespace
 # characters of body in each, at least one `Options:` line inside Decisions,
@@ -52,6 +52,22 @@
 # session scratchpad as an allowed write location. Template:
 # $HOME/.claude/plans/TEMPLATE.md.
 #
+# 2026-09-08 (Aaron), plan-rule follow-ups from the first hours under it,
+# three fixes. First, the template no longer tells an author to write "None."
+# under New surface: the 40-character floor applies to every section, so that
+# section now asks for one sentence saying that nothing with an audience is
+# added and why. Second, a memory path holding ".." is refused instead of
+# resolved, the way the scratchpad and plans paths already were; the memory
+# pattern's * spans slashes, so a traversal through it reached any file on
+# disk. Third, a spawn prompt may name a plan under any
+# $HOME/.claude/plans/<name>/ directory and not only the session project's
+# own, because a plan lives with the project the change belongs to, which is
+# often not the project the orchestrating session runs in. The shape,
+# freshness and ".." checks are identical wherever the plan lives, and those
+# are what protect approval; the directory name is a filing convention. A
+# denial that finds no plan path in the prompt still names the session
+# project's directory as the default place to put one.
+#
 # The gate enforces plan approval before CHANGES and nothing else — reading
 # is never gated (Aaron, 2026-08-13). Fail-closed on the write side: while
 # disarmed, Bash is limited to a read-only allowlist of simple commands, and
@@ -63,8 +79,10 @@ set -f # no pathname expansion while word-splitting command segments
 PROJECT_DIR="${1:-$PWD}"
 MARKER="$PROJECT_DIR/.claude/plan-approved"
 
-# The plan file a write-capable spawn must cite lives under the project's own
-# directory inside the user-global plans root, so one rule serves every repo.
+# Plans live in per-project directories inside the user-global plans root. The
+# session project's own directory is the default a denial points at, and a
+# spawn may cite a plan under any project directory there, since the change
+# often belongs to another repo (the 2026-09-08 follow-up above).
 PROJECT_NAME="$(basename "$PROJECT_DIR")"
 PLANS_ROOT="$HOME/.claude/plans"
 PLAN_DIR="$PLANS_ROOT/$PROJECT_NAME"
@@ -132,7 +150,7 @@ deny_plan() {
   # message class differs on purpose (Aaron, 2026-09-08) because neither
   # arming nor delegation is the remedy here. The remedy is a plan file with
   # the required shape, approved before the spawn.
-  jq -cn --arg r "NO APPROVED PLAN: $1. A write-capable spawn requires a plan file under $PLAN_DIR/ carrying all eight sections (Goal, Out of scope, Design fit, Decisions, New surface, Steps, Verification, Fallback), 40+ non-whitespace characters in each, and an 'Options:' line under Decisions. Template: $PLAN_TEMPLATE. Write or fix the plan, then ask Aaron to approve it and arm the gate again." \
+  jq -cn --arg r "NO APPROVED PLAN: $1. A write-capable spawn requires a plan file under $PLAN_DIR/, or under the plans directory of the project the change belongs to, carrying all eight sections (Goal, Out of scope, Design fit, Decisions, New surface, Steps, Verification, Fallback), 40+ non-whitespace characters in each, and an 'Options:' line under Decisions. Template: $PLAN_TEMPLATE. Write or fix the plan, then ask Aaron to approve it and arm the gate again." \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
   exit 0
 }
@@ -368,7 +386,12 @@ case "$TOOL" in
     # since notes and working files there are not the codebase. Every other
     # file, armed or not, belongs to an executor.
     FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')"
+    # The * of the memory pattern spans slashes, exactly as it does in
+    # is_scratchpad_path, so a memory path holding .. is refused outright here
+    # too rather than resolved: the first arm claims it and the exemption
+    # below never sees it (Aaron, 2026-09-08).
     case "$FILE_PATH" in
+      *..*) ;;
       "$HOME"/.claude/projects/*/memory/*)
         exit 0
         ;;
@@ -405,9 +428,9 @@ is_read_only_agent_type() {
   return 1
 }
 
-# Escapes the ERE metacharacters of a literal path segment before it is
-# spliced into the plan-path pattern. A project directory named with a dot or
-# a plus would otherwise match more than itself.
+# Escapes the ERE metacharacters of a literal path prefix before it is
+# spliced into the plan-path pattern. A home directory named with a dot or a
+# plus would otherwise match more than itself.
 re_escape() {
   printf '%s' "$1" | sed -E 's/[][(){}.^$*+?|\\]/\\&/g'
 }
@@ -449,10 +472,12 @@ check_plan_file() {
 
   # The prompt must carry the path, so the plan the executor is told to build
   # from is the same file the gate validated. Newest-by-mtime is used only for
-  # the denial hint below. The filename segment excludes / and whitespace,
-  # which keeps the match inside the project's plans directory and lets
-  # trailing punctuation in prose fall outside it.
-  plan_re="($(re_escape "$HOME")|~)/\\.claude/plans/$(re_escape "$PROJECT_NAME")/[^[:space:]/]+\\.md"
+  # the denial hint below. Both the project segment and the filename segment
+  # exclude / and whitespace, which keeps the match exactly one directory
+  # under the plans root and lets trailing punctuation in prose fall outside
+  # it. The project segment is any name (the 2026-09-08 follow-up), so the
+  # ".." refusal below is what keeps the cited plan inside the plans root.
+  plan_re="($(re_escape "$HOME")|~)/\\.claude/plans/[^[:space:]/]+/[^[:space:]/]+\\.md"
   plan="$(printf '%s' "$prompt" | grep -oE "$plan_re" | head -n 1 || true)"
 
   if [ -z "$plan" ]; then
@@ -467,6 +492,13 @@ check_plan_file() {
 
   case "$plan" in
     '~'/*) plan="$HOME/${plan#\~/}" ;;
+  esac
+
+  # A project segment of ".." points the citation out of the plans root
+  # altogether, so it is refused rather than resolved, the same way the three
+  # path tests above refuse it.
+  case "$plan" in
+    *..*) deny_plan "the plan path '$plan' holds '..', which is refused rather than resolved" ;;
   esac
 
   if [ ! -f "$plan" ]; then
