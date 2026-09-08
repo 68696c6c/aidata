@@ -54,7 +54,10 @@ Detail review runs only on shapes that survive this pass.
   untyped/dynamic value, an unchecked cast, or a suppressed type error in code
   this repo owns. Third-party signatures that force one are consumed at the
   boundary and stop there; propagating one into this repo's own parameters,
-  fields, or return types is the violation.
+  fields, or return types is the violation. An unjustified divergence from a
+  pattern recorded in any doctrine layer is a Blocker; the fix is conformance.
+  A proposal to change the pattern is a separate ruling asked before code is
+  written, never a reason to ship the divergence.
 - **Important** — a violation of any rule in this file or in the language and
   repo layers loaded for this review. **Design-ruling conformance is Important
   even when every test passes**: a change that contradicts a recorded ruling
