@@ -34,6 +34,24 @@
 # marker cannot lift them, and they carry their own denial message because
 # arming is not the remedy for them.
 #
+# 2026-09-08 (Aaron), the PLAN FILE rule: an armed marker alone no longer
+# authorizes a write-capable Agent spawn. The spawn prompt has to name a plan
+# file under $HOME/.claude/plans/<project>/, where <project> is the basename of
+# the project root, and the gate reads that file. It requires all eight
+# sections as `## ` headings (Goal, Out of scope, Design fit, Decisions, New
+# surface, Steps, Verification, Fallback), at least 40 non-whitespace
+# characters of body in each, at least one `Options:` line inside Decisions,
+# and a marker at least as new as the plan, so editing a plan after approval
+# re-requires approval. The reason: a plan that was approved and was detailed
+# still hid a design decision inside its prose, because prose can run long
+# without ever naming a choice or its alternatives. A fixed shape forces the
+# alternatives into a place a reviewer reads before arming. The rule is global
+# and project-agnostic: every repo the gate covers resolves its own plans
+# directory from its own root. Because the main session has to write the plan
+# it will later cite, $HOME/.claude/plans/ joins the memory directory and the
+# session scratchpad as an allowed write location. Template:
+# $HOME/.claude/plans/TEMPLATE.md.
+#
 # The gate enforces plan approval before CHANGES and nothing else — reading
 # is never gated (Aaron, 2026-08-13). Fail-closed on the write side: while
 # disarmed, Bash is limited to a read-only allowlist of simple commands, and
@@ -44,6 +62,27 @@ set -f # no pathname expansion while word-splitting command segments
 
 PROJECT_DIR="${1:-$PWD}"
 MARKER="$PROJECT_DIR/.claude/plan-approved"
+
+# The plan file a write-capable spawn must cite lives under the project's own
+# directory inside the user-global plans root, so one rule serves every repo.
+PROJECT_NAME="$(basename "$PROJECT_DIR")"
+PLANS_ROOT="$HOME/.claude/plans"
+PLAN_DIR="$PLANS_ROOT/$PROJECT_NAME"
+PLAN_TEMPLATE="$PLANS_ROOT/TEMPLATE.md"
+
+# The required sections, in the order the template lists them. A plan missing
+# any of these is refused before its bodies are measured, so the denial names
+# the missing heading rather than an empty section.
+PLAN_HEADINGS=(
+  "Goal"
+  "Out of scope"
+  "Design fit"
+  "Decisions"
+  "New surface"
+  "Steps"
+  "Verification"
+  "Fallback"
+)
 
 INPUT="$(cat)"
 
@@ -87,6 +126,17 @@ deny_orchestrator() {
   exit 0
 }
 
+deny_plan() {
+  # Same jq construction and the same fail-open reasoning as deny(): $1 quotes
+  # a path and a heading read out of a model-written prompt and file. The
+  # message class differs on purpose (Aaron, 2026-09-08) because neither
+  # arming nor delegation is the remedy here. The remedy is a plan file with
+  # the required shape, approved before the spawn.
+  jq -cn --arg r "NO APPROVED PLAN: $1. A write-capable spawn requires a plan file under $PLAN_DIR/ carrying all eight sections (Goal, Out of scope, Design fit, Decisions, New surface, Steps, Verification, Fallback), 40+ non-whitespace characters in each, and an 'Options:' line under Decisions. Template: $PLAN_TEMPLATE. Write or fix the plan, then ask Aaron to approve it and arm the gate again." \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
+  exit 0
+}
+
 # The only places the main session writes for itself: its own memory directory
 # (handled at the Write branch) and the per-session scratchpad. The uid segment
 # is Aaron's 501 today, so claude-* keeps the rule working if the uid changes.
@@ -98,6 +148,19 @@ is_scratchpad_path() {
     *..*) return 1 ;;
     /private/tmp/claude-*/*/scratchpad | /private/tmp/claude-*/*/scratchpad/*) return 0 ;;
     /tmp/claude-*/*/scratchpad | /tmp/claude-*/*/scratchpad/*) return 0 ;;
+  esac
+  return 1
+}
+
+# The third place the main session writes for itself (Aaron, 2026-09-08): the
+# plan files a write-capable spawn has to cite. Writing the plan cannot be
+# delegated, since the spawn that would do the delegating is what the plan
+# authorizes. A path holding .. is refused outright rather than resolved, the
+# same rule is_scratchpad_path applies and for the same reason.
+is_plans_path() {
+  case "$1" in
+    *..*) return 1 ;;
+    "$PLANS_ROOT"/*) return 0 ;;
   esac
   return 1
 }
@@ -313,6 +376,9 @@ case "$TOOL" in
     if is_scratchpad_path "$FILE_PATH"; then
       exit 0
     fi
+    if is_plans_path "$FILE_PATH"; then
+      exit 0
+    fi
     deny_orchestrator "$TOOL to ${FILE_PATH:-an unnamed path}"
     ;;
   Bash)
@@ -327,6 +393,135 @@ case "$TOOL" in
     ;;
 esac
 
+# The read-only agent roles, declared once because two branches test them now:
+# the plan-file gate just below and the disarmed spawn gate further down.
+# verifier is included because its in-place experiments are always reverted and
+# reviewer is read-and-run by contract. An unknown or unset type is treated as
+# write-capable, which fails CLOSED to the gated side.
+is_read_only_agent_type() {
+  case "$1" in
+    scout | Explore | verifier | reviewer) return 0 ;;
+  esac
+  return 1
+}
+
+# Escapes the ERE metacharacters of a literal path segment before it is
+# spliced into the plan-path pattern. A project directory named with a dot or
+# a plus would otherwise match more than itself.
+re_escape() {
+  printf '%s' "$1" | sed -E 's/[][(){}.^$*+?|\\]/\\&/g'
+}
+
+# BSD stat and GNU stat spell the modification time differently, so try the
+# macOS form first and fall back to the GNU one. Prints nothing if neither
+# works, which the caller treats as a failure. -L follows a symlink to its
+# target: BSD stat reports the link's own mtime otherwise, which would let a
+# plan symlinked before arming have its target rewritten after it and still
+# read as fresh.
+file_mtime() {
+  stat -L -f %m "$1" 2>/dev/null || stat -L -c %Y "$1" 2>/dev/null || true
+}
+
+# Prints the body of one `## ` section: every line after the heading up to the
+# next `## ` heading or EOF. Sections may appear in any order, so the walk
+# tracks which heading it is inside rather than counting.
+plan_section() {
+  awk -v want="$2" '
+    /^## / {
+      name = substr($0, 4)
+      sub(/[[:space:]]+$/, "", name)
+      inside = (name == want)
+      next
+    }
+    inside { print }
+  ' "$1"
+}
+
+# The plan-file rule (Aaron, 2026-09-08). Called only for a write-capable
+# Agent spawn from the main session with the marker already in place, so the
+# arming message still comes first while disarmed and the marker check stays
+# the outer gate. Every failure exits through deny_plan naming the one check
+# that failed; falling off the end means the plan is valid.
+check_plan_file() {
+  local prompt plan_re plan heading body nws marker_mtime plan_mtime newest
+
+  prompt="$(printf '%s' "$INPUT" | jq -r '.tool_input.prompt // empty')"
+
+  # The prompt must carry the path, so the plan the executor is told to build
+  # from is the same file the gate validated. Newest-by-mtime is used only for
+  # the denial hint below. The filename segment excludes / and whitespace,
+  # which keeps the match inside the project's plans directory and lets
+  # trailing punctuation in prose fall outside it.
+  plan_re="($(re_escape "$HOME")|~)/\\.claude/plans/$(re_escape "$PROJECT_NAME")/[^[:space:]/]+\\.md"
+  plan="$(printf '%s' "$prompt" | grep -oE "$plan_re" | head -n 1 || true)"
+
+  if [ -z "$plan" ]; then
+    # set -f is on for the whole hook, so the glob is expanded inside the
+    # command substitution's subshell where restoring it costs nothing.
+    newest="$(
+      set +f
+      ls -t "$PLAN_DIR"/*.md 2>/dev/null | head -n 1 || true
+    )"
+    deny_plan "the spawn prompt for '$SUBAGENT_TYPE' names no plan file under $PLAN_DIR/ (newest plan there: ${newest:-none found})"
+  fi
+
+  case "$plan" in
+    '~'/*) plan="$HOME/${plan#\~/}" ;;
+  esac
+
+  if [ ! -f "$plan" ]; then
+    deny_plan "the plan file '$plan' named in the prompt is not an existing regular file"
+  fi
+
+  for heading in "${PLAN_HEADINGS[@]}"; do
+    if ! grep -qE "^## $heading[[:space:]]*\$" "$plan"; then
+      deny_plan "'$plan' has no '## $heading' heading"
+    fi
+  done
+
+  for heading in "${PLAN_HEADINGS[@]}"; do
+    body="$(plan_section "$plan" "$heading")"
+    nws="$(printf '%s' "$body" | tr -d '[:space:]' | wc -c)"
+    nws="${nws//[[:space:]]/}"
+    if [ "$nws" -lt 40 ]; then
+      deny_plan "the '$heading' section of '$plan' holds $nws non-whitespace characters, under the 40 required"
+    fi
+  done
+
+  # A here-string, not a pipe: with pipefail a producer killed by SIGPIPE when
+  # grep -q exits early would set the pipeline's status and invert this test.
+  body="$(plan_section "$plan" "Decisions")"
+  if ! grep -qiE '^[[:space:]]*([-*]|[0-9]+\.)?[[:space:]]*Options:' <<<"$body"; then
+    deny_plan "the 'Decisions' section of '$plan' has no 'Options:' line, so no alternatives were written down"
+  fi
+
+  # Freshness: approval covers the bytes Aaron read. A plan edited after the
+  # marker was touched has not been approved in its current form.
+  marker_mtime="$(file_mtime "$MARKER")"
+  plan_mtime="$(file_mtime "$plan")"
+  if [ -z "$marker_mtime" ] || [ -z "$plan_mtime" ]; then
+    deny_plan "the modification time of '$plan' or of the approval marker could not be read"
+  fi
+  if [ "$marker_mtime" -lt "$plan_mtime" ]; then
+    deny_plan "plan modified after arming: '$plan' is newer than the approval marker; arm again"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Plan-file gate (Aaron, 2026-09-08), between the marker test and the armed
+# early-allow: arming authorizes a write-capable spawn only when a plan file
+# with the required shape backs it. Ordered after the marker on purpose, so a
+# disarmed session is told to get the gate armed rather than being sent to
+# rewrite a plan it has not yet had approved.
+# ---------------------------------------------------------------------------
+if [ "$TOOL" = "Agent" ] && [ -f "$MARKER" ]; then
+  SUBAGENT_TYPE="$(printf '%s' "$INPUT" | jq -r '.tool_input.subagent_type // empty')"
+  if ! is_read_only_agent_type "$SUBAGENT_TYPE"; then
+    SUBAGENT_TYPE="${SUBAGENT_TYPE:-default}"
+    check_plan_file
+  fi
+fi
+
 if [ -f "$MARKER" ]; then
   exit 0
 fi
@@ -335,16 +530,13 @@ case "$TOOL" in
   # The unit of approval is the SPAWN (Aaron, 2026-08-20): a write-capable
   # agent type needs the armed marker to launch; after that its own tool
   # calls pass the agent_id early-allow above, so a turn ending (and
-  # disarming) never strands a running agent. Read-only roles spawn freely —
-  # verifier is included because its in-place experiments are always
-  # reverted and reviewer is read-and-run by contract. Unknown or unset types fail CLOSED to the gated side.
+  # disarming) never strands a running agent. Read-only roles spawn freely,
+  # per is_read_only_agent_type above.
   Agent)
     SUBAGENT_TYPE="$(printf '%s' "$INPUT" | jq -r '.tool_input.subagent_type // empty')"
-    case "$SUBAGENT_TYPE" in
-      scout | Explore | verifier | reviewer)
-        exit 0
-        ;;
-    esac
+    if is_read_only_agent_type "$SUBAGENT_TYPE"; then
+      exit 0
+    fi
     deny "spawning the write-capable agent type '${SUBAGENT_TYPE:-default}' requires an armed plan approval"
     ;;
   # Workflow stays denied: fanning out dozens of agents is a scale commitment
