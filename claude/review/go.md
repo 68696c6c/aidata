@@ -38,6 +38,14 @@ severities and the output contract come from there.
 - **Boundary constructor.** A value entering from outside (HTTP, JSON, env, DB
   scan) is converted with `FooFromString(s) (Foo, error)` and rejected at the
   edge, so downstream code can trust the type.
+- **Stored enums implement `Scan` and `Value`.** An enum type used as a model
+  column implements `sql.Scanner` and `driver.Valuer`: `Scan` converts the
+  stored string through the enum's own `FooFromString` and returns its error,
+  `Value` returns the string. Without them the database is the one boundary
+  that bypasses the vocabulary, and a stored stray loads as a typed value the
+  type says cannot exist. A stored enum missing the pair is a Blocker, and a
+  comment beside it explaining the omission is an admission, not a mitigation.
+  (Ruled 2026-09-09: "all enums need Scan and Value methods.")
 
 ## Interfaces and construction
 
@@ -112,6 +120,20 @@ severities and the output contract come from there.
   `Create`, and couples a generic builder to domain rules. If an action must
   assert several things at once, WIDEN the request to carry them and let the
   caller fill it.
+- **One request type per resource, declared with the model.** This rule's
+  subject is RESOURCE request types: a struct bound from a resource route to
+  build or mutate a model. A resource's request type is declared where its
+  model is declared, never in a controller or handler package, and there is
+  exactly one of it. Which fields a client may set is expressed on that one
+  struct (a json tag exposes a field, `json:"-"` hides one), so adding a write
+  path means tagging a field, not declaring a second struct. A
+  controller-local request struct, or a second request struct for a resource
+  that already has one, is a Blocker regardless of the rationale written
+  beside it. A required-field question about a request is answered by the
+  owning repo or service's validation, never by a `binding:"required"` tag.
+  Protocol payloads that bind no model (an OAuth or OIDC token, logout, or
+  authorize body, form- or query-encoded) are outside this rule and are
+  named as exceptions in a repo's own layer.
 - **Server-owned identity is the exception in the other direction**: ids and
   derived storage keys are built by the owning layer, never accepted from a
   request, and are not assignable through `Update`. A request carrying one
@@ -146,7 +168,12 @@ severities and the output contract come from there.
 - **Struct literals declare fields explicitly, one field per line**, named
   never positional — including literals used as map keys or inside index
   expressions, where the clean fix is a named variable declared above. Maps,
-  slices, and fieldless arrays are exempt; a struct HOLDING them is not.
+  slices, and fieldless arrays are exempt; a struct HOLDING them is not. The
+  one carve-out (ruled 2026-09-09): the rows of a test case table, a
+  `[]namedCase{...}` literal whose cases run under `t.Run`, may keep their
+  fields on one line, because a row reads as one case and the repo's tests
+  universally use that shape. Every other struct literal, in test files
+  included, stays one field per line.
 - **No alias-only assignments** (`x := y` with no transformation) — name the
   parameter or variable correctly at its source.
 - **Never declare a variable used exactly once solely to take its address** —
