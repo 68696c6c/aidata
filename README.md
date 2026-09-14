@@ -24,6 +24,8 @@ Hand-rolled shell and symlinks. No Dotbot, no framework, no dependencies beyond
 | (four hook entries) | `~/.claude/settings.json` | merge |
 | `pilotfish/agents/*.md` (6) | `~/.claude/agents/*.md` | seed |
 | `pilotfish/claude-md-block.md` | `~/.claude/CLAUDE.md` | seed |
+| `omp/agents/reviewer.md` | `~/.omp/agent/agents/reviewer.md` | link |
+| `omp/agents/verifier.md` | `~/.omp/agent/agents/verifier.md` | link |
 
 Four mechanisms, four different ownership rules:
 
@@ -123,6 +125,51 @@ review-role section, edit **`claude/claude-md.d/10-review-role.md`** in the repo
 re-run `./install.sh` — editing the live file directly works until the next
 install, which overwrites the block. Keep the markers as the first and last
 lines.
+
+## Second harness: omp
+
+[omp](https://omp.sh) (oh-my-pi, `omp`, source at
+<https://github.com/can1357/oh-my-pi>) is the second coding-agent harness this
+repo sets up. It runs Kimi K3 through Fireworks and drives the projects Aaron
+chooses to drive with it; the Claude Code + pilotfish setup keeps driving the
+rest and is untouched by any of this. The harness is chosen per project by
+running `omp` instead of `claude` in that repo. Nothing in the repo marks it,
+and nothing under `~/.claude/` changes when omp is installed or removed.
+
+What the two harnesses share is the doctrine. Both a Claude `reviewer` and an
+omp `reviewer`, and likewise both `verifier` roles, load the same
+`~/.claude/review/global.md`, the same language layer (`go.md`), and the same
+`<repo-root>/.claude/review/*.md`. Those paths are aidata symlinks and stay
+readable whether or not Claude Code is running.
+
+What aidata manages here is exactly two symlinks, `omp/agents/reviewer.md` and
+`omp/agents/verifier.md` into `~/.omp/agent/agents/`, because omp discovers
+user-level task agents from `~/.omp/agent/agents/*.md` and deliberately ignores
+`.claude/agents` (the frontmatter schema differs). The link block is skipped,
+not warned about, on a machine where `~/.omp/agent` does not exist yet: install
+omp, run it once, then re-run `./install.sh`.
+
+What aidata does not manage: `~/.omp/agent/config.yml` and
+`~/.omp/agent/models.yml`, because omp writes them at runtime and a file with
+two writers loses one of them, and the Fireworks credential, which this repo
+never stores, reads, or moves. `FIREWORKS_API_KEY` is the environment variable
+omp's built-in `fireworks` provider reads; set it in your shell profile the way
+you set the other provider keys.
+
+Known gap: an omp session has no approval gate. The gate and the plan-file
+rule are Claude Code hooks (`claude/hooks/approval-gate.sh`), while omp hooks
+are TypeScript modules under `~/.omp/agent/hooks/pre/`. Porting them is a
+separate job that has not been done.
+
+The omp role files carry a hand copy of each Claude role's body, so they can
+drift. These two commands must each show exactly one hunk, the one line the
+provenance comment in each file explains:
+
+```sh
+cd ~/Code/aidata
+diff <(tail -n +17 omp/agents/reviewer.md) <(tail -n +12 claude/agents/reviewer.md)
+diff <(tail -n +16 omp/agents/verifier.md) <(tail -n +9 pilotfish/agents/verifier.md)
+```
 
 ## Cross-vendor review
 

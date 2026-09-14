@@ -11,6 +11,8 @@
 #   aidata-owned  — symlinked into the repo; edit either path, it is one file
 #   pilotfish     — seeded by copy ONLY when absent; pilotfish's own installer
 #                   owns and upgrades them thereafter
+#   omp           - the omp role files are aidata-owned and symlinked into
+#                   ~/.omp/agent/agents; config.yml stays omp's
 
 set -euo pipefail
 
@@ -86,6 +88,33 @@ link_managed() {
   ln -s "$src" "$dest"
   say "linked   $dest"
   n_linked=$((n_linked + 1))
+}
+
+# --- omp harness agents --------------------------------------------------------
+#
+# omp (oh-my-pi) discovers user-level task agents from ~/.omp/agent/agents/*.md
+# and deliberately ignores ~/.claude/agents, whose frontmatter schema differs.
+# The omp `reviewer` and `verifier` roles therefore get their own files, which
+# this repo owns and links exactly like the Claude reviewer above: edit either
+# path, it is one file. Both harnesses' roles cite the same ~/.claude/review/
+# layers, so the doctrine itself stays single-sourced.
+#
+# ~/.omp/agent/config.yml is NOT managed here. omp writes it at runtime, and a
+# file with two writers loses one of them: the same reasoning that keeps aidata
+# out of settings.json beyond the hook merge (pilotfish/settings-keys.md).
+
+install_omp_agents() {
+  local omp_home="$HOME/.omp/agent"
+
+  if [ ! -d "$omp_home" ]; then
+    say "skipped  $omp_home absent (omp not initialized here); install omp, run it once, and re-run"
+    n_skipped=$((n_skipped + 1))
+    return 0
+  fi
+
+  mkdir -p "$omp_home/agents"
+  link_managed "$REPO/omp/agents/reviewer.md" "$omp_home/agents/reviewer.md"
+  link_managed "$REPO/omp/agents/verifier.md" "$omp_home/agents/verifier.md"
 }
 
 # --- CLAUDE.md managed blocks --------------------------------------------------
@@ -352,6 +381,9 @@ printf '\nhooks\n'
 link_managed "$REPO/claude/hooks/approval-gate.sh" "$CLAUDE_HOME/hooks/approval-gate.sh"
 link_managed "$REPO/claude/hooks/disarm-gate.sh"   "$CLAUDE_HOME/hooks/disarm-gate.sh"
 install_user_hooks
+
+printf '\nomp harness\n'
+install_omp_agents
 
 printf '\npilotfish bootstrap\n'
 seed_pilotfish_agents
