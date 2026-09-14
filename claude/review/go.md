@@ -93,6 +93,9 @@ severities and the output contract come from there.
 - **Wrap at package boundaries with structured context** — the operation name
   and the relevant IDs and inputs. A bare `fmt.Errorf("failed to X")` crossing a
   package boundary is a finding.
+- **A boundary wrap carries a stack trace.** Wrap with `github.com/pkg/errors`
+  (`errors.Wrap`, `errors.Wrapf`, `errors.WithStack`) or with a custom error
+  type that records one. The trace is what a boundary wrap is for.
 - **Split validation from server failure at the service boundary:**
   `(result, validationErr, serverErr)` with the server error LAST, so the
   caller branches without sniffing types or message strings. Repos that only
@@ -134,6 +137,11 @@ severities and the output contract come from there.
   Protocol payloads that bind no model (an OAuth or OIDC token, logout, or
   authorize body, form- or query-encoded) are outside this rule and are
   named as exceptions in a repo's own layer.
+- **Controllers and handlers bind and format only.** A handler binds the
+  request, calls the owning service or repo, and shapes the response.
+  Validation lives in the owning repo or service (previous bullet) and business
+  logic in the service layer; a query, a domain decision, or a mutation inside
+  a handler is a finding.
 - **Server-owned identity is the exception in the other direction**: ids and
   derived storage keys are built by the owning layer, never accepted from a
   request, and are not assignable through `Update`. A request carrying one
@@ -159,6 +167,12 @@ severities and the output contract come from there.
   clause of a single UPDATE and check the affected-row count; optimistic
   concurrency with a version column; row locking only when the first three
   genuinely cannot work, presented with its timeout cost stated.
+- **Field names map to their columns under GORM's default naming strategy.**
+  A `gorm:"column:..."` override on an added line is a finding: a name that
+  needs an override is the wrong name, so rename the field. Functional gorm
+  tags (`gorm:"-"`, `foreignKey`, `references`) are unaffected. Existing
+  overrides in a repo are a backlog for a sweep of their own, never precedent.
+  Every query carries the request context through `db.WithContext(ctx)`.
 
 ## Style
 
@@ -234,6 +248,8 @@ sweep the whole diff for the same shape.
 - `^type .* interface` inside consumers and services — a subset of a shared
   interface is a violation.
 - `func init\(` — forbidden.
+- `gorm:"column:`, a column-name override; functional gorm tags do not match
+  this pattern.
 - One-line multi-field struct literals. The naive `\{[^{}]+, [^{}]+\}` net is
   BLIND to nesting (`Foo{a: map[k]v{}, b: map[k]v{}}` escapes it) — strip
   innermost `{}` pairs first, then re-apply, or match added lines containing
