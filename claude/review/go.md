@@ -88,14 +88,18 @@ severities and the output contract come from there.
 
 - **`context.Context` is propagated as the first parameter of every call that
   can block or do I/O, and is never stored in a struct.**
+- **Every GORM query carries that context through `db.WithContext(ctx)`.** A
+  query built from a bare `db` while a `ctx` is in scope is a finding.
 - **Custom error types over sentinel errors.** Define typed errors carrying the
   relevant fields; check with `errors.Is` / `errors.As`.
 - **Wrap at package boundaries with structured context** — the operation name
   and the relevant IDs and inputs. A bare `fmt.Errorf("failed to X")` crossing a
   package boundary is a finding.
-- **A boundary wrap carries a stack trace.** Wrap with `github.com/pkg/errors`
-  (`errors.Wrap`, `errors.Wrapf`, `errors.WithStack`) or with a custom error
-  type that records one. The trace is what a boundary wrap is for.
+- **A boundary wrap carries a stack trace.** Wrap with `errors.Wrap` or
+  `errors.Wrapf` from `github.com/pkg/errors`, or with a custom error type that
+  records one; the trace is what a boundary wrap is for. Stdlib `errors`
+  records no trace, which makes `pkg/errors` the one recorded exception to the
+  Stdlib first rule.
 - **Split validation from server failure at the service boundary:**
   `(result, validationErr, serverErr)` with the server error LAST, so the
   caller branches without sniffing types or message strings. Repos that only
@@ -138,10 +142,9 @@ severities and the output contract come from there.
   authorize body, form- or query-encoded) are outside this rule and are
   named as exceptions in a repo's own layer.
 - **Controllers and handlers bind and format only.** A handler binds the
-  request, calls the owning service or repo, and shapes the response.
-  Validation lives in the owning repo or service (previous bullet) and business
-  logic in the service layer; a query, a domain decision, or a mutation inside
-  a handler is a finding.
+  request, calls the owning service or repo, and shapes the response. A
+  validation check, a query, a domain decision, or a mutation inside a handler
+  is a finding.
 - **Server-owned identity is the exception in the other direction**: ids and
   derived storage keys are built by the owning layer, never accepted from a
   request, and are not assignable through `Update`. A request carrying one
@@ -172,7 +175,6 @@ severities and the output contract come from there.
   needs an override is the wrong name, so rename the field. Functional gorm
   tags (`gorm:"-"`, `foreignKey`, `references`) are unaffected. Existing
   overrides in a repo are a backlog for a sweep of their own, never precedent.
-  Every query carries the request context through `db.WithContext(ctx)`.
 
 ## Style
 
