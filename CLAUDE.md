@@ -12,11 +12,11 @@ Professional software engineering work across a polyglot stack for multiple clie
 
 Language-level code rules are not written in this file. They live in the layered review doctrine, which is the ruled and current source:
 
-- `~/.claude/review/global.md`, section 7 (portable rules for every language)
-- `~/.claude/review/go.md` (the Go layer, for any repo with a `go.mod`)
+- `~/.claude/review/global.md`, the section "Portable rules that outrank style" (rules for every language)
+- `~/.claude/review/go.md` (the Go layer, for any repo with a `go.mod` at its root or one directory below)
 - the repo's own `.claude/review/*.md` (the project layer, when present)
 
-Read the layers that apply before writing or changing code. The `reviewer` role grades the diff against the same files, and no other file restates them. Where an older copy of a rule elsewhere disagrees with the doctrine, the doctrine wins.
+Read the layers that apply before writing or changing code. The `reviewer` role grades the diff against the same files. The polyglot bullets below stay because languages without a doctrine layer need them; where one of them and the doctrine speak to the same point, the doctrine's wording wins.
 
 ---
 
@@ -37,7 +37,7 @@ Read the layers that apply before writing or changing code. The `reviewer` role 
 ## Code Standards
 
 - **Strict quality** — full typing, linting, and tests; no shortcuts
-- **Strict type safety** — no `any`, no `interface{}` without justification, no type assertions without checks; eliminate categories of runtime errors at compile time
+- **Strict type safety:** no `any`, and no bare `interface{}` in code we own; a third-party signature that forces one is consumed at the boundary and goes no further. No type assertions without checks; eliminate categories of runtime errors at compile time
 - **Declarative over imperative** — prefer expressions over statements, data-driven configuration over procedural setup, and declarative APIs (SQL, HCL, JSX) over manual orchestration
 - **Pure functions when possible** — avoid side effects and hidden state; isolate I/O at the edges; minimize indirection layers that obscure control flow
 - **Always write tests** for new code unless explicitly told not to
