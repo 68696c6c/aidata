@@ -22,11 +22,18 @@
 #   REVIEW_MODEL      model id
 #   REVIEW_API_KEY    bearer token
 #
-# VENDOR EXAMPLES (base URLs verified against vendor docs 2026-08-28)
+# VENDOR EXAMPLES (base URLs verified against vendor docs 2026-08-28; the
+#                 Fireworks URLs verified 2026-09-14)
 #   Moonshot / Kimi — https://platform.kimi.ai/docs/api/chat
 #     REVIEW_API_BASE=https://api.moonshot.ai/v1
 #     REVIEW_MODEL=kimi-k3            # model list is on the page above
 #     REVIEW_API_KEY=sk-...
+#
+#   Fireworks: https://docs.fireworks.ai/tools-sdks/openai-compatibility
+#     REVIEW_API_BASE=https://api.fireworks.ai/inference/v1
+#     REVIEW_MODEL=accounts/fireworks/models/kimi-k3
+#                                     # https://fireworks.ai/models/fireworks/kimi-k3
+#     REVIEW_API_KEY=$FIREWORKS_API_KEY
 #
 #   xAI / Grok — https://docs.x.ai/docs/api-reference
 #     REVIEW_API_BASE=https://api.x.ai/v1
@@ -51,7 +58,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --range) [ $# -ge 2 ] || die "--range needs an argument"; MODE=range; RANGE=$2; shift 2 ;;
     --staged) MODE=staged; shift ;;
-    -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,48p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done

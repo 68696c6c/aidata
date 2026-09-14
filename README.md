@@ -183,6 +183,11 @@ export REVIEW_API_BASE=https://api.moonshot.ai/v1   # includes the version path
 export REVIEW_MODEL=kimi-k3
 export REVIEW_API_KEY=sk-...
 
+# or the same model through Fireworks, the vendor the omp harness runs on:
+export REVIEW_API_BASE=https://api.fireworks.ai/inference/v1
+export REVIEW_MODEL=accounts/fireworks/models/kimi-k3
+export REVIEW_API_KEY="$FIREWORKS_API_KEY"
+
 review.sh                        # staged + unstaged vs HEAD
 review.sh --staged               # staged only
 review.sh --range origin/main..HEAD
@@ -192,3 +197,8 @@ review.sh --help                 # vendor examples and exit codes
 Run it from anywhere inside the repo under review. It assembles
 `~/.claude/review/global.md`, the language layer (`go.md` when the repo has a
 `go.mod`), and the repo's own `.claude/review/*.md`.
+
+Vendor inversion in an omp project: there Kimi K3 is the model doing the
+primary work, so a Kimi review is no longer a second vendor's opinion. Use the
+Claude `reviewer` role, or `review.sh` pointed at Moonshot or xAI, for the
+second opinion in those repos.
