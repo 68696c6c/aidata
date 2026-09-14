@@ -95,11 +95,12 @@ severities and the output contract come from there.
 - **Wrap at package boundaries with structured context** — the operation name
   and the relevant IDs and inputs. A bare `fmt.Errorf("failed to X")` crossing a
   package boundary is a finding.
-- **A boundary wrap carries a stack trace.** Wrap with `errors.Wrap` or
-  `errors.Wrapf` from `github.com/pkg/errors`, or with a custom error type that
-  records one; the trace is what a boundary wrap is for. Stdlib `errors`
-  records no trace, which makes `pkg/errors` the one recorded exception to the
-  Stdlib first rule.
+- **A boundary wrap carries a stack trace.** Wrap with a custom error type
+  that records one, or with `errors.Wrap` / `errors.Wrapf` from
+  `github.com/pkg/errors`; which of the two a repo uses is the repo's choice,
+  and the trace is what a boundary wrap is for. Stdlib `errors` records no
+  trace, so `pkg/errors` is exempt from the Stdlib first rule (ruled
+  2026-09-14: "pkg/errors is fine to use or not use, it's up to the project").
 - **Split validation from server failure at the service boundary:**
   `(result, validationErr, serverErr)` with the server error LAST, so the
   caller branches without sniffing types or message strings. Repos that only
@@ -209,6 +210,8 @@ severities and the output contract come from there.
 - **Stdlib first.** A new dependency for something `net/http`, `encoding/json`,
   `errors`, or `context` already covers is a finding. New dependencies are
   justified on maintenance status, transitive weight, and licence.
+  The one exception is `github.com/pkg/errors`, per the stack-trace bullet
+  under Context and errors.
 - **Pinned versions in `go.mod`** — no floating ranges.
 - **Flag removals too**: a dependency no longer imported but still declared is a
   finding.
