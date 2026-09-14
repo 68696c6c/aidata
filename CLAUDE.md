@@ -4,7 +4,19 @@
 
 Professional software engineering work across a polyglot stack for multiple clients and systems. Prioritize correctness, clarity, and maintainability over speed.
 
-**CLAUDE.md hierarchy:** This is the root-level file. Client- and project-specific `CLAUDE.md` files exist at deeper levels and take precedence for their scope. When instructions conflict, the most specific (deepest) file wins. This file defines the baseline that all projects inherit.
+**CLAUDE.md hierarchy:** `~/.claude/CLAUDE.md` (orchestration and review roles) loads above this file. This file is the `~/Code` baseline, linked from the aidata repo, and every project under `~/Code` inherits it. Client- and project-specific `CLAUDE.md` files at deeper levels take precedence for their scope: when instructions conflict, the most specific (deepest) file wins.
+
+---
+
+## Code doctrine
+
+Language-level code rules are not written in this file. They live in the layered review doctrine, which is the ruled and current source:
+
+- `~/.claude/review/global.md`, section 7 (portable rules for every language)
+- `~/.claude/review/go.md` (the Go layer, for any repo with a `go.mod`)
+- the repo's own `.claude/review/*.md` (the project layer, when present)
+
+Read the layers that apply before writing or changing code. The `reviewer` role grades the diff against the same files, and no other file restates them. Where an older copy of a rule elsewhere disagrees with the doctrine, the doctrine wins.
 
 ---
 
@@ -45,7 +57,6 @@ Professional software engineering work across a polyglot stack for multiple clie
 - **Diagnose before fixing** — read error messages, logs, and stack traces before proposing changes; don't guess
 - **Reproduce first** — confirm the failure case before writing a fix; suggest a reproduction step or test if one doesn't exist
 - **Fix root causes, not symptoms** — if a nil check "fixes" a crash, explain why the value is nil in the first place
-- **Go errors:** use custom error types or `pkg/errors` for wrapping with stack traces; avoid bare `fmt.Errorf` for anything that crosses package boundaries
 - **Structured context on errors** — include relevant IDs, operation names, and inputs when wrapping; never wrap with just "failed to do X" and no context
 
 ---
@@ -74,25 +85,9 @@ Professional software engineering work across a polyglot stack for multiple clie
 
 - **Isolated unit tests with mocked dependencies** — test your code, not third-party behavior; don't test what you don't own
 - **Very high coverage on critical business logic** — auth flows, payment processing, data transformations, validation rules
-- **Table-driven tests in Go when appropriate** — not a default; use when cases genuinely share a shape. Declare a named case struct (never an anonymous `[]struct{...}` literal — anonymous structs with fields are forbidden everywhere, tests included) and run cases with `t.Run` subtests
 - **Mock at the interface boundary** — define interfaces for external dependencies; mock those, not concrete types
-- **Test naming** — `Test<Function>_<scenario>_<expected>` (e.g., `TestCreateUser_duplicateEmail_returnsConflict`)
 - **Test file colocation** — `*_test.go` next to the source in Go; `*.test.ts` next to the source in TypeScript
 - **No test helpers that hide assertions** — keep assertions visible in the test body; helpers for setup only
-- **Fail fast with clear messages** — use `t.Fatalf` / `t.Errorf` with descriptive messages, not bare `t.Fail()`
-
----
-
-## Go-Specific Conventions
-
-- **Always propagate `context.Context`** — first parameter, never stored in structs
-- **Custom error types over sentinel errors** — define typed errors with relevant fields; use `errors.Is` / `errors.As` for checking
-- **Wrap errors at package boundaries** — add context when crossing layers (handler → service → repo)
-- **Interfaces belong to the consumer** — define interfaces where they're used, not where they're implemented
-- **Pointer receivers for mutating methods, value receivers for pure reads** — be consistent per type
-- **No `init()` functions** — use explicit initialization; `init()` hides side effects
-- **GORM conventions** — choose field names that map cleanly under GORM's conventional naming strategy; never override with `gorm:"column:..."` tags (a name that needs an override is the wrong name); prefer `db.WithContext(ctx)` always
-- **Gin handlers** — extract business logic into service layer; handlers do validation, binding, and response formatting only
 
 ---
 
