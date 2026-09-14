@@ -158,10 +158,13 @@ therefore shadows omp's bundled `reviewer` on purpose, so the doctrine
 reviewer replaces omp's own, which spawns `scout` and returns a structured
 schema; `verifier` has no bundled counterpart to shadow. `omp agents unpack`
 writes into the same directory: without `--force` it leaves the two symlinks
-alone, with `--force` it replaces them with regular files, and the next
-`./install.sh` then reports each as differing from the repo copy, exits 1,
-and prints both resolutions, which is the existing never-clobber rule doing
-its job.
+alone. `omp agents unpack --force` writes through the symlink and overwrites
+the repo-tracked `omp/agents/reviewer.md` with omp's bundled reviewer
+(measured on omp 18.1.21); the link survives, so `./install.sh` sees a
+correct link and reports nothing. The guard is git: `git -C ~/Code/aidata
+status` shows the file modified and `git -C ~/Code/aidata restore
+omp/agents/reviewer.md` puts the doctrine reviewer back. Do not run `unpack
+--force` on a machine where these links exist.
 
 What aidata does not manage: `~/.omp/agent/config.yml` and
 `~/.omp/agent/models.yml`, because omp writes them at runtime and a file with

@@ -105,9 +105,10 @@ link_managed() {
 # file with two writers loses one of them: the same reasoning that keeps aidata
 # out of settings.json beyond the hook merge (pilotfish/settings-keys.md).
 #
-# `omp agents unpack --force` is that directory's other writer; it can replace
-# these two symlinks with regular files. link_managed's divergence warning is
-# the guard: the next install reports and refuses to clobber the mismatch.
+# `omp agents unpack --force` is that directory's other writer; it writes through the symlink
+# and overwrites the repo file, and link_managed, seeing a correct link, stays
+# silent. The guard is git in the aidata checkout, which shows the file
+# modified and restores it.
 
 install_omp_agents() {
   local omp_home="$HOME/.omp/agent"

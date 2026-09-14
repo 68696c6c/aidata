@@ -1,7 +1,7 @@
 ---
 name: verifier
 description: Fresh-context adversarial verification of completed work. Use after any non-trivial change, before reporting it done - give it the claimed outcome and the diff/paths, and it independently tries to refute the claim by exercising the code, running tests, and probing edge cases. Returns CONFIRMED or REFUTED with evidence. Read-and-run only; it never fixes what it finds.
-model: fireworks/kimi-k3  # [verify] with: omp models fireworks
+model: fireworks/kimi-k3
 tools: read, grep, glob, bash
 ---
 
