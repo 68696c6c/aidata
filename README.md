@@ -1,8 +1,8 @@
 # aidata
 
-Portable manager for Aaron's Claude setup. Clone it on a new machine, run
-`./install.sh`, and the doctrine, the review system, and a working set of
-orchestration roles are in place.
+Portable manager for Aaron's coding-agent setup: Claude Code with pilotfish,
+and omp. Clone it on a new machine, run `./install.sh`, and the doctrine, the
+review system, and a working set of orchestration roles are in place.
 
 Hand-rolled shell and symlinks. No Dotbot, no framework, no dependencies beyond
 `bash`, `git`, coreutils, and `jq` (the hooks parse their input with it, and the
@@ -136,11 +136,13 @@ rest and is untouched by any of this. The harness is chosen per project by
 running `omp` instead of `claude` in that repo. Nothing in the repo marks it,
 and nothing under `~/.claude/` changes when omp is installed or removed.
 
-What the two harnesses share is the doctrine. Both a Claude `reviewer` and an
-omp `reviewer`, and likewise both `verifier` roles, load the same
+What the two harnesses share is the doctrine, and only in the reviewers. Both
+a Claude `reviewer` and an omp `reviewer` load the same
 `~/.claude/review/global.md`, the same language layer (`go.md`), and the same
 `<repo-root>/.claude/review/*.md`. Those paths are aidata symlinks and stay
-readable whether or not Claude Code is running.
+readable whether or not Claude Code is running. The two `verifier` roles share
+one body and contract (pilotfish's text) and load no review layer by design:
+a verifier refutes a claim rather than grading a diff against doctrine.
 
 What aidata manages here is exactly two symlinks, `omp/agents/reviewer.md` and
 `omp/agents/verifier.md` into `~/.omp/agent/agents/`, because omp discovers
@@ -148,6 +150,18 @@ user-level task agents from `~/.omp/agent/agents/*.md` and deliberately ignores
 `.claude/agents` (the frontmatter schema differs). The link block is skipped,
 not warned about, on a machine where `~/.omp/agent` does not exist yet: install
 omp, run it once, then re-run `./install.sh`.
+
+omp ships bundled agents named `reviewer`, `scout`, `security-reviewer`,
+`sonic`, and `task` (`omp agents unpack` writes them), and a non-bundled agent
+with the same name overrides the bundled one. The linked `reviewer.md`
+therefore shadows omp's bundled `reviewer` on purpose, so the doctrine
+reviewer replaces omp's own, which spawns `scout` and returns a structured
+schema; `verifier` has no bundled counterpart to shadow. `omp agents unpack`
+writes into the same directory: without `--force` it leaves the two symlinks
+alone, with `--force` it replaces them with regular files, and the next
+`./install.sh` then reports each as differing from the repo copy, exits 1,
+and prints both resolutions, which is the existing never-clobber rule doing
+its job.
 
 What aidata does not manage: `~/.omp/agent/config.yml` and
 `~/.omp/agent/models.yml`, because omp writes them at runtime and a file with
@@ -163,12 +177,14 @@ separate job that has not been done.
 
 The omp role files carry a hand copy of each Claude role's body, so they can
 drift. These two commands must each show exactly one hunk, the one line the
-provenance comment in each file explains:
+provenance comment in each file explains. The anchors are the line ending the
+provenance comment and the frontmatter fence, so frontmatter growth on either
+side leaves the check exact:
 
 ```sh
 cd ~/Code/aidata
-diff <(tail -n +17 omp/agents/reviewer.md) <(tail -n +12 claude/agents/reviewer.md)
-diff <(tail -n +16 omp/agents/verifier.md) <(tail -n +9 pilotfish/agents/verifier.md)
+diff <(sed '1,/-->$/d' omp/agents/reviewer.md) <(sed '1,/-->$/d' claude/agents/reviewer.md)
+diff <(sed '1,/-->$/d' omp/agents/verifier.md) <(sed -n '/^---$/,/^---$/!p' pilotfish/agents/verifier.md)
 ```
 
 ## Cross-vendor review

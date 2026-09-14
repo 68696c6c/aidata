@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# install.sh — link aidata-managed files into place and bootstrap pilotfish.
+# install.sh: link aidata-managed files into place, bootstrap pilotfish, and
+# link the omp roles.
 #
 # Idempotent: re-running is a no-op. Never clobbers a divergent local edit —
 # a regular file whose content differs from the repo copy is left alone and
@@ -96,12 +97,17 @@ link_managed() {
 # and deliberately ignores ~/.claude/agents, whose frontmatter schema differs.
 # The omp `reviewer` and `verifier` roles therefore get their own files, which
 # this repo owns and links exactly like the Claude reviewer above: edit either
-# path, it is one file. Both harnesses' roles cite the same ~/.claude/review/
-# layers, so the doctrine itself stays single-sourced.
+# path, it is one file. The two `reviewer` roles cite the same ~/.claude/review/
+# layers, so the doctrine itself stays single-sourced; the two `verifier` roles
+# share a body and contract, not a doctrine, and load no review layer.
 #
 # ~/.omp/agent/config.yml is NOT managed here. omp writes it at runtime, and a
 # file with two writers loses one of them: the same reasoning that keeps aidata
 # out of settings.json beyond the hook merge (pilotfish/settings-keys.md).
+#
+# `omp agents unpack --force` is that directory's other writer; it can replace
+# these two symlinks with regular files. link_managed's divergence warning is
+# the guard: the next install reports and refuses to clobber the mismatch.
 
 install_omp_agents() {
   local omp_home="$HOME/.omp/agent"
