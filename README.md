@@ -159,9 +159,9 @@ with the same name overrides the bundled one. The linked `reviewer.md`
 therefore shadows omp's bundled `reviewer` on purpose, so the doctrine
 reviewer replaces omp's own, which spawns `scout` and returns a structured
 schema; `verifier` has no bundled counterpart to shadow. `omp agents unpack`
-writes into the same directory: without `--force` it leaves the two symlinks
-alone. `omp agents unpack --force` writes through the symlink and overwrites
-the repo-tracked `omp/agents/reviewer.md` with omp's bundled reviewer
+writes into the same directory: without `--force` it leaves the two agent
+symlinks alone. `omp agents unpack --force` writes through the symlink and
+overwrites the repo-tracked `omp/agents/reviewer.md` with omp's bundled reviewer
 (measured on omp 18.1.21); the link survives, so `./install.sh` sees a
 correct link and reports nothing. The guard is git: `git -C ~/Code/aidata
 status` shows the file modified and `git -C ~/Code/aidata restore
@@ -180,12 +180,20 @@ has: Glass on `session_stop`, which fires once when a main-agent turn settles
 and never for task agents, and Ping on `tool_approval_requested`. It is the omp
 counterpart of the Claude Code `Stop` and `Notification` hooks `install.sh`
 merges into `~/.claude/settings.json`, and the two sound paths are a hand copy
-of the two `afplay` commands there, so they can drift. This check must print
-each of the two paths with a count of 2, once per file:
+of the two `afplay` commands there, so they can drift. Each of the two sound
+paths appears exactly once in each of the two files; this check must print
+exactly these four lines:
 
 ```sh
 cd ~/Code/aidata
-grep -oh '/System/Library/Sounds/[A-Za-z]*\.aiff' install.sh omp/extensions/bell.ts | sort | uniq -c
+grep -o '/System/Library/Sounds/[A-Za-z]*\.aiff' install.sh omp/extensions/bell.ts | sort | uniq -c
+```
+
+```
+   1 install.sh:/System/Library/Sounds/Glass.aiff
+   1 install.sh:/System/Library/Sounds/Ping.aiff
+   1 omp/extensions/bell.ts:/System/Library/Sounds/Glass.aiff
+   1 omp/extensions/bell.ts:/System/Library/Sounds/Ping.aiff
 ```
 
 Known gap: an omp session has no approval gate. The gate and the plan-file

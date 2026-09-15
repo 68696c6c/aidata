@@ -102,7 +102,7 @@ link_managed() {
 # share a body and contract, not a doctrine, and load no review layer.
 #
 # Extension modules come from a second directory: omp discovers user-level
-# extensions from ~/.omp/agent/extensions/, which is where bell.ts is linked.
+# extensions from ~/.omp/agent/extensions/.
 #
 # ~/.omp/agent/config.yml is NOT managed here. omp writes it at runtime, and a
 # file with two writers loses one of them: the same reasoning that keeps aidata
