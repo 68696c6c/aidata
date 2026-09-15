@@ -91,7 +91,7 @@ link_managed() {
   n_linked=$((n_linked + 1))
 }
 
-# --- omp harness agents --------------------------------------------------------
+# --- omp harness ---------------------------------------------------------------
 #
 # omp (oh-my-pi) discovers user-level task agents from ~/.omp/agent/agents/*.md
 # and deliberately ignores ~/.claude/agents, whose frontmatter schema differs.
@@ -100,6 +100,9 @@ link_managed() {
 # path, it is one file. The two `reviewer` roles cite the same ~/.claude/review/
 # layers, so the doctrine itself stays single-sourced; the two `verifier` roles
 # share a body and contract, not a doctrine, and load no review layer.
+#
+# Extension modules come from a second directory: omp discovers user-level
+# extensions from ~/.omp/agent/extensions/, which is where bell.ts is linked.
 #
 # ~/.omp/agent/config.yml is NOT managed here. omp writes it at runtime, and a
 # file with two writers loses one of them: the same reasoning that keeps aidata
@@ -110,7 +113,7 @@ link_managed() {
 # silent. The guard is git in the aidata checkout, which shows the file
 # modified and restores it.
 
-install_omp_agents() {
+install_omp() {
   local omp_home="$HOME/.omp/agent"
 
   if [ ! -d "$omp_home" ]; then
@@ -122,6 +125,9 @@ install_omp_agents() {
   mkdir -p "$omp_home/agents"
   link_managed "$REPO/omp/agents/reviewer.md" "$omp_home/agents/reviewer.md"
   link_managed "$REPO/omp/agents/verifier.md" "$omp_home/agents/verifier.md"
+
+  mkdir -p "$omp_home/extensions"
+  link_managed "$REPO/omp/extensions/bell.ts" "$omp_home/extensions/bell.ts"
 }
 
 # --- CLAUDE.md managed blocks --------------------------------------------------
@@ -288,6 +294,7 @@ seed_pilotfish_block() {
 install_user_hooks() {
   local bell_stop bell_notify gate_pre gate_stop specs base tmp
 
+  # omp/extensions/bell.ts hand-copies these two sound paths; change both.
   bell_stop='afplay /System/Library/Sounds/Glass.aiff 2>/dev/null || true'
   bell_notify='afplay /System/Library/Sounds/Ping.aiff 2>/dev/null || true'
   gate_pre="$CLAUDE_HOME/hooks/approval-gate.sh"
@@ -390,7 +397,7 @@ link_managed "$REPO/claude/hooks/disarm-gate.sh"   "$CLAUDE_HOME/hooks/disarm-ga
 install_user_hooks
 
 printf '\nomp harness\n'
-install_omp_agents
+install_omp
 
 printf '\npilotfish bootstrap\n'
 seed_pilotfish_agents

@@ -144,12 +144,14 @@ readable whether or not Claude Code is running. The two `verifier` roles share
 one body and contract (pilotfish's text) and load no review layer by design:
 a verifier refutes a claim rather than grading a diff against doctrine.
 
-What aidata manages here is exactly two symlinks, `omp/agents/reviewer.md` and
-`omp/agents/verifier.md` into `~/.omp/agent/agents/`, because omp discovers
+What aidata manages here is exactly three symlinks: `omp/agents/reviewer.md`
+and `omp/agents/verifier.md` into `~/.omp/agent/agents/`, because omp discovers
 user-level task agents from `~/.omp/agent/agents/*.md` and deliberately ignores
-`.claude/agents` (the frontmatter schema differs). The link block is skipped,
-not warned about, on a machine where `~/.omp/agent` does not exist yet: install
-omp, run it once, then re-run `./install.sh`.
+`.claude/agents` (the frontmatter schema differs), and
+`omp/extensions/bell.ts` into `~/.omp/agent/extensions/`, because omp
+discovers user-level extensions from `~/.omp/agent/extensions/`. The link
+block is skipped, not warned about, on a machine where `~/.omp/agent` does not
+exist yet: install omp, run it once, then re-run `./install.sh`.
 
 omp ships bundled agents named `reviewer`, `scout`, `security-reviewer`,
 `sonic`, and `task` (`omp agents unpack` writes them), and a non-bundled agent
@@ -173,10 +175,25 @@ never stores, reads, or moves. `FIREWORKS_API_KEY` is the environment variable
 omp's built-in `fireworks` provider reads; set it in your shell profile the way
 you set the other provider keys.
 
+`omp/extensions/bell.ts` gives an omp session the same audible cue Claude Code
+has: Glass on `session_stop`, which fires once when a main-agent turn settles
+and never for task agents, and Ping on `tool_approval_requested`. It is the omp
+counterpart of the Claude Code `Stop` and `Notification` hooks `install.sh`
+merges into `~/.claude/settings.json`, and the two sound paths are a hand copy
+of the two `afplay` commands there, so they can drift. This check must print
+each of the two paths with a count of 2, once per file:
+
+```sh
+cd ~/Code/aidata
+grep -oh '/System/Library/Sounds/[A-Za-z]*\.aiff' install.sh omp/extensions/bell.ts | sort | uniq -c
+```
+
 Known gap: an omp session has no approval gate. The gate and the plan-file
-rule are Claude Code hooks (`claude/hooks/approval-gate.sh`), while omp hooks
-are TypeScript modules under `~/.omp/agent/hooks/pre/`. Porting them is a
-separate job that has not been done.
+rule are Claude Code hooks (`claude/hooks/approval-gate.sh`); omp extension
+modules are TypeScript files under `~/.omp/agent/extensions/`, this repo's
+first being `omp/extensions/bell.ts`, and a `tool_call` blocker would go under
+`~/.omp/agent/hooks/pre/`. Porting them is a separate job that has not been
+done.
 
 The omp role files carry a hand copy of each Claude role's body, so they can
 drift. These two commands must each show exactly one hunk, the one line the
