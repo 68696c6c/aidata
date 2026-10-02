@@ -1,0 +1,158 @@
+# Gate bypass corpus. Tab-separated: mode, command (with \n escapes), expected verdict.
+# mode: both | disarmed | armed. verdict: allow | deny.
+# Golden = behavior of approval-gate.sh as of 2026-09-18, reviewed case by case.
+# Every regression fix in the gate's comments has a case here; add new bypasses here first.
+#
+# --- plain reads: always allowed ---
+both	ls -la	allow
+both	git status	allow
+both	git log --oneline -5	allow
+both	git diff HEAD~1	allow
+both	git fetch origin	allow
+both	cat file.txt | grep foo | wc -l	allow
+both	ps aux | grep node	allow
+both	sleep 1 && echo done	allow
+# git push is on the Claude disarmed allowlist (shipping stays armed-or-not). The
+# OMP gate additionally pipeline-gates it; that layer is not this corpus's concern.
+both	git push origin main	allow
+#
+# --- mutating git: denied by the orchestrator scan in every mode ---
+both	git add .	deny
+both	git commit -m x	deny
+both	git checkout -b feat	deny
+both	git reset --hard HEAD	deny
+both	git branch -D old	deny
+both	git branch --move a b	deny
+both	git worktree add /tmp/wt	deny
+both	git tag v1	deny
+# reads through global options; --git-dir=<path> log is a read of another checkout
+both	git -C /tmp status	allow
+disarmed	git --git-dir=/tmp/x/.git log	deny
+armed	git --git-dir=/tmp/x/.git log	allow
+both	git branch	allow
+#
+# --- interpreters: the interpreter itself is refused, every form ---
+both	python -c "print(1)"	deny
+both	python3 script.py	deny
+both	node -e "1"	deny
+both	bun run x	deny
+both	ruby -e "1"	deny
+both	perl -e "1"	deny
+both	php r.php	deny
+both	deno run x.ts	deny
+#
+# --- file-writing commands ---
+both	tee /tmp/x	deny
+both	cat f | tee /tmp/x	deny
+both	dd if=/dev/zero of=/tmp/x	deny
+both	truncate -s 0 /tmp/x	deny
+both	rsync a b	deny
+both	install x /tmp/y	deny
+both	patch < p.diff	deny
+#
+# --- path-checked movers: scratch (/tmp) ok when armed, never when disarmed ---
+# every path argument must be in scratch, sources included (fail closed)
+armed	cp /tmp/a /tmp/b	allow
+armed	rm -rf /tmp/scratch-x	allow
+armed	mv /tmp/a /tmp/b	allow
+armed	touch /tmp/x	allow
+armed	mkdir /tmp/x	allow
+disarmed	cp a /tmp/b	deny
+both	cp a /tmp/b	deny
+disarmed	rm -rf /tmp/scratch-x	deny
+both	rm -rf /	deny
+both	cp a b	deny
+both	mv a /tmp/b	deny
+both	chmod 755 x	deny
+both	rmdir x	deny
+both	ln -s a b	deny
+#
+# --- quoting/path normalization bypasses (found live 2026-08-31) ---
+both	\mkdir x	deny
+both	"/bin/rm" x	deny
+both	'r'm x	deny
+both	/bin/rm -rf x	deny
+armed	\mkdir /tmp/x	allow
+# prefix words only prefix the real command
+both	xargs rm < /dev/null	deny
+armed	command rm -rf /tmp/x	allow
+both	command rm -rf x	deny
+both	sudo rm -rf x	deny
+disarmed	FOO=bar ls	deny
+armed	FOO=bar ls	allow
+both	FOO=bar rm x	deny
+#
+# --- substitutions and redirections ---
+both	echo $(rm -rf x)	deny
+armed	echo $(rm -rf /tmp/x)	allow
+disarmed	echo $(ls)	deny
+armed	echo `date`	allow
+both	echo `rm x`	deny
+armed	echo hi > /tmp/x	allow
+armed	echo hi > /private/tmp/x	allow
+disarmed	echo hi > /tmp/x	deny
+both	echo hi > ./x	deny
+both	echo hi > $HOME/x	deny
+both	echo hi 2>/dev/null	allow
+both	echo hi 2>&1 | cat	allow
+# the disarmed pre-check refuses every '>' that survives stderr-stripping, /dev/null included
+disarmed	ls > /dev/null	deny
+armed	ls > /dev/null	allow
+# process substitution splits into scanned segments; the fd it makes writes nothing
+disarmed	cat <(echo hi)	deny
+armed	cat <(echo hi)	allow
+armed	echo hi > /tmp/x && cat /tmp/x	allow
+#
+# --- sed ---
+both	sed -i '' s/a/b/ f	deny
+both	sed --in-place s/a/b/ f	deny
+both	sed s/a/b/ f	allow
+#
+# --- find ---
+both	find . -name '*.ts'	allow
+both	find . -delete	deny
+both	find . -exec rm {} +	deny
+#
+# --- curl ---
+both	curl -X GET https://example.com	allow
+both	curl -s https://example.com	allow
+disarmed	curl -X POST https://example.com	deny
+armed	curl -X POST https://example.com	allow
+disarmed	curl -o out.txt https://example.com	deny
+both	curl -o /dev/null https://example.com	allow
+disarmed	curl -T f https://example.com	deny
+#
+# --- gh ---
+both	gh pr view 1	allow
+both	gh pr list	allow
+both	gh pr create --title x --body y	allow
+both	gh run rerun 123	allow
+disarmed	gh pr merge 1	deny
+armed	gh pr merge 1	allow
+disarmed	gh api -X DELETE /repos/x	deny
+both	gh api /repos/x	allow
+disarmed	gh api -f k=v /repos/x	deny
+#
+# --- docker ---
+both	docker ps	allow
+both	docker images	allow
+disarmed	docker run alpine	deny
+armed	docker run alpine	allow
+both	docker compose ps	allow
+#
+# --- compounds, heredocs, newlines: every segment is examined ---
+both	ls; rm x	deny
+both	ls && git add .	deny
+both	echo hi || rm x	deny
+both	printf 'a\\nb' | sort	allow
+both	cat <<EOF\nrm x\nEOF	deny
+armed	cat <<EOF\nls /tmp\nEOF	allow
+both	nohup rm x &	deny
+#
+# --- build tools: not reads; denied disarmed, allowed armed (blast-radius call) ---
+disarmed	make	deny
+armed	make	allow
+disarmed	pnpm install	deny
+armed	pnpm install	allow
+disarmed	npm test	deny
+armed	npm test	allow
