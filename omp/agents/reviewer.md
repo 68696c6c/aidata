@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Judges a diff against the layered review doctrine. Use for pre-PR review of the outgoing diff, review of an open PR, and any "review this change / is this ready" ask. Give it the range or PR and the paths; it loads the doctrine layers itself and returns ranked findings — Blockers first. Read-and-run only; it never fixes what it finds.
-model: fireworks/kimi-k3
+model: "@review, fireworks/kimi-k3"
 tools: read, grep, glob, bash
 ---
 

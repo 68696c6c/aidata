@@ -26,6 +26,7 @@ Hand-rolled shell and symlinks. No Dotbot, no framework, no dependencies beyond
 | `pilotfish/claude-md-block.md` | `~/.claude/CLAUDE.md` | seed |
 | `omp/agents/reviewer.md` | `~/.omp/agent/agents/reviewer.md` | link |
 | `omp/agents/verifier.md` | `~/.omp/agent/agents/verifier.md` | link |
+| `omp/config.yml` | `~/.omp/agent/config.yml` | link |
 
 Four mechanisms, four different ownership rules:
 
@@ -144,14 +145,18 @@ readable whether or not Claude Code is running. The two `verifier` roles share
 one body and contract (pilotfish's text) and load no review layer by design:
 a verifier refutes a claim rather than grading a diff against doctrine.
 
-What aidata manages here is exactly three symlinks: `omp/agents/reviewer.md`
-and `omp/agents/verifier.md` into `~/.omp/agent/agents/`, because omp discovers
-user-level task agents from `~/.omp/agent/agents/*.md` and deliberately ignores
-`.claude/agents` (the frontmatter schema differs), and
-`omp/extensions/bell.ts` into `~/.omp/agent/extensions/`, because omp
-discovers user-level extensions from `~/.omp/agent/extensions/`. The link
-block is skipped, not warned about, on a machine where `~/.omp/agent` does not
-exist yet: install omp, run it once, then re-run `./install.sh`.
+What aidata manages here: five role links into `~/.omp/agent/agents/`
+(`reviewer.md`, `verifier.md`, `executor.md`, `mech-executor.md`,
+`security-executor.md`) — omp discovers user-level task agents from
+`~/.omp/agent/agents/*.md` and deliberately ignores `.claude/agents` (the
+frontmatter schema differs) — plus `omp/extensions/bell.ts` into
+`~/.omp/agent/extensions/`, two shared gate scripts into
+`~/.omp/agent/gate/`, and one GENERATED hook stub at
+`~/.omp/agent/hooks/pre/write-gate.ts` (generated, not linked, because omp
+hook discovery silently skips symlinked files — verified live 2026-09-18;
+see "The omp write gate" below). The link block is skipped, not warned
+about, on a machine where `~/.omp/agent` does not exist yet: install omp,
+run it once, then re-run `./install.sh`.
 
 omp ships bundled agents named `reviewer`, `scout`, `security-reviewer`,
 `sonic`, and `task` (`omp agents unpack` writes them), and a non-bundled agent
@@ -168,12 +173,86 @@ status` shows the file modified and `git -C ~/Code/aidata restore
 omp/agents/reviewer.md` puts the doctrine reviewer back. Do not run `unpack
 --force` on a machine where these links exist.
 
-What aidata does not manage: `~/.omp/agent/config.yml` and
-`~/.omp/agent/models.yml`, because omp writes them at runtime and a file with
-two writers loses one of them, and the Fireworks credential, which this repo
-never stores, reads, or moves. `FIREWORKS_API_KEY` is the environment variable
-omp's built-in `fireworks` provider reads; set it in your shell profile the way
-you set the other provider keys.
+What aidata does not manage: `~/.omp/agent/models.yml`, because omp writes it
+at runtime and a file with two writers loses one of them.
+`~/.omp/agent/config.yml` has the same second writer (omp's runtime writes
+through the link: `setupVersion`, `dev.*`, `/settings` edits) but is
+aidata-owned and symlinked since 2026-09-25, adopting the agent-link guard:
+git in the aidata checkout shows runtime writes as drift to review and commit
+or restore, and if a runtime write ever replaces the symlink with a regular
+file, install.sh reports the divergent file loudly rather than relinking. The
+linked config carries the modelRoles aliases (`@execute`, `@mech`,
+`@security`, `@verify`, `@review`) the role frontmatter references. Projects
+override any role in `<repo>/.omp/config.yml`; omp deep-merges records, so
+naming one role inherits the rest. The Fireworks credential this repo never
+stores, reads, or moves: `FIREWORKS_API_KEY` is the environment variable
+omp's built-in `fireworks` provider reads; set it in your shell profile the
+way you set the other provider keys.
+
+### The omp write gate
+
+`omp/hooks/write-gate.ts` closes what used to be the known gap: an omp
+session now has the same approval gate Claude Code has, same doctrine, same
+scanner. The design, and the two omp platform findings it rests on (both
+probed live 2026-09-18):
+
+- **Shared judgment, separate plumbing.** Command scanning and plan-shape
+  checking are NOT reimplemented: the hook execs `~/.omp/agent/gate/
+  scan-bash.sh` and `check-plan.sh`, extracted verbatim from
+  `claude/hooks/approval-gate.sh` into `gate/`. `gate/cases.tsv` is the
+  characterization corpus recorded against the pre-extraction gate;
+  `gate/test.sh` (end-to-end through the Claude hook, or `--direct` against
+  the scanner) and `gate/test-plan.sh` must stay green. A missing or failing
+  script fails CLOSED.
+- **Every agent gets its own hook instance; the module is shared.** The main
+  session's instance gates; task subagents pass through (approval was spent
+  at the spawn — the `agent_id` rule) except that they refuse writes to the
+  gate's own files and report their completion into the shared registry at
+  `yield`. An instance classifies as a subagent only on positive evidence
+  (a session file under `omp-task-*/` or a sidecar in the main session's
+  artifact directory), so a classification failure degrades toward gating.
+- **`turn_end` fires per model step, not per user turn** — the disarm lives
+  on `agent_end` (the Stop-hook analog) with `session_shutdown` as backstop.
+  The marker is `<repo>/.omp/plan-approved`; arm with
+  `mkdir -p .omp && touch .omp/plan-approved`.
+- **The main session is the orchestrator.** Reads flow; write/edit are
+  refused except under `~/.claude/plans/` (the shared plans root — a plan
+  belongs to the project, not the harness); `eval` is refused outright (a
+  full runtime defeats command scanning, and eval-prelude bridges like
+  `tab.run` never emit hook events); bash is scanned (`--disarmed` read-only
+  allowlist, or `--orchestrator` when armed); write-capable spawns require
+  the marker plus a shape-checked plan cited in the spawn text.
+- **The pipeline is mechanical**: executor completion -> EXECUTED, verifier
+  completion (without REFUTED) -> VERIFIED, reviewer completion ->
+  REVIEWED, and `git push` / `gh pr create` / `gh pr merge` are denied until
+  REVIEWED. An executor completing after a verifier regresses the phase to
+  EXECUTED. State is per-process; a restart fails closed to ARMED.
+
+**The gate REQUIRES `tools.approvalMode: yolo` in `~/.omp/agent/config.yml`.**
+omp hooks can block a tool call but cannot grant approval, so the tiered
+approval modes must get out of the way for the gate to be the single policy
+point. The linked `omp/config.yml` carries the setting; install.sh links it
+like every other aidata-owned file.
+
+Two honest limits: an absent or broken hook is a silent allow (same as the
+Claude gate; the guard is git plus install.sh), and hooks observe AgentTool
+calls only, which is precisely why `eval` is denied rather than scanned.
+
+The omp role files carry a hand copy of each Claude/pilotfish role's body,
+so they can drift. These commands must each show exactly the hunk count
+noted — the lines the provenance comment in each file explains (the
+leaf-agent line, plus for security-executor the model-routing sentence).
+The anchors are the line ending the provenance comment and the frontmatter
+fence, so frontmatter growth on either side leaves the check exact:
+
+```sh
+cd ~/Code/aidata
+diff <(sed '1,/-->$/d' omp/agents/reviewer.md) <(sed '1,/-->$/d' claude/agents/reviewer.md)              # 1 hunk
+diff <(sed '1,/-->$/d' omp/agents/verifier.md) <(sed -n '/^---$/,/^---$/!p' pilotfish/agents/verifier.md) # 1 hunk
+diff <(sed '1,/-->$/d' omp/agents/executor.md) <(sed -n '/^---$/,/^---$/!p' pilotfish/agents/executor.md) # 1 hunk
+diff <(sed '1,/-->$/d' omp/agents/mech-executor.md) <(sed -n '/^---$/,/^---$/!p' pilotfish/agents/mech-executor.md) # 1 hunk
+diff <(sed '1,/-->$/d' omp/agents/security-executor.md) <(sed -n '/^---$/,/^---$/!p' pilotfish/agents/security-executor.md) # 2 hunks
+```
 
 `omp/extensions/bell.ts` gives an omp session the same audible cue Claude Code
 has: Glass on `session_stop`, which fires once when a main-agent turn settles
@@ -194,25 +273,6 @@ grep -o '/System/Library/Sounds/[A-Za-z]*\.aiff' install.sh omp/extensions/bell.
    1 install.sh:/System/Library/Sounds/Ping.aiff
    1 omp/extensions/bell.ts:/System/Library/Sounds/Glass.aiff
    1 omp/extensions/bell.ts:/System/Library/Sounds/Ping.aiff
-```
-
-Known gap: an omp session has no approval gate. The gate and the plan-file
-rule are Claude Code hooks (`claude/hooks/approval-gate.sh`); omp extension
-modules are TypeScript files under `~/.omp/agent/extensions/`, this repo's
-first being `omp/extensions/bell.ts`, and a `tool_call` blocker would go under
-`~/.omp/agent/hooks/pre/`. Porting them is a separate job that has not been
-done.
-
-The omp role files carry a hand copy of each Claude role's body, so they can
-drift. These two commands must each show exactly one hunk, the one line the
-provenance comment in each file explains. The anchors are the line ending the
-provenance comment and the frontmatter fence, so frontmatter growth on either
-side leaves the check exact:
-
-```sh
-cd ~/Code/aidata
-diff <(sed '1,/-->$/d' omp/agents/reviewer.md) <(sed '1,/-->$/d' claude/agents/reviewer.md)
-diff <(sed '1,/-->$/d' omp/agents/verifier.md) <(sed -n '/^---$/,/^---$/!p' pilotfish/agents/verifier.md)
 ```
 
 ## Cross-vendor review
