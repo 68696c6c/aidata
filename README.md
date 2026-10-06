@@ -149,7 +149,7 @@ What aidata manages here: five role links into `~/.omp/agent/agents/`
 (`reviewer.md`, `verifier.md`, `executor.md`, `mech-executor.md`,
 `security-executor.md`) — omp discovers user-level task agents from
 `~/.omp/agent/agents/*.md` and deliberately ignores `.claude/agents` (the
-frontmatter schema differs) — plus `omp/extensions/bell.ts` into
+frontmatter schema differs) — plus `omp/extensions/bell.ts` and `omp/extensions/hindsight.ts` into
 `~/.omp/agent/extensions/`, two shared gate scripts into
 `~/.omp/agent/gate/`, and one GENERATED hook stub at
 `~/.omp/agent/hooks/pre/write-gate.ts` (generated, not linked, because omp
@@ -184,10 +184,16 @@ file, install.sh reports the divergent file loudly rather than relinking. The
 linked config carries the modelRoles aliases (`@execute`, `@mech`,
 `@security`, `@verify`, `@review`) the role frontmatter references. Projects
 override any role in `<repo>/.omp/config.yml`; omp deep-merges records, so
-naming one role inherits the rest. The Fireworks credential this repo never
-stores, reads, or moves: `FIREWORKS_API_KEY` is the environment variable
-omp's built-in `fireworks` provider reads; set it in your shell profile the
-way you set the other provider keys.
+naming one role inherits the rest. omp's built-in `fireworks` provider reads
+the `FIREWORKS_API_KEY` environment variable; set it in your shell profile the
+way you set the other provider keys. The one exception to "this repo never
+stores the credential" is `.env` at the repo root (gitignored, mode 600 —
+template: `.example.env`), which holds `HINDSIGHT_API_LLM_API_KEY`,
+`FIREWORKS_API_KEY`, and `OMP_GATE_DEBUG`: the hindsight extension spawns the
+server outside any shell profile, the gate hook likewise runs in every repo,
+and omp itself auto-loads a launch-directory `.env` for unset keys — so
+sessions started in this repo pick all three up natively — added 2026-10-06
+at the user's direction.
 
 ### The omp write gate
 
@@ -274,6 +280,43 @@ grep -o '/System/Library/Sounds/[A-Za-z]*\.aiff' install.sh omp/extensions/bell.
    1 omp/extensions/bell.ts:/System/Library/Sounds/Glass.aiff
    1 omp/extensions/bell.ts:/System/Library/Sounds/Ping.aiff
 ```
+
+### Hindsight memory
+
+omp has a native [Hindsight](https://hindsight.vectorize.io/) memory backend
+(`memory.backend: hindsight` in `omp/config.yml`): sessions auto-recall
+relevant memories on the first turn, auto-retain every few turns, and expose
+`recall` / `retain` / `reflect` tools plus a `/memory` command. Scoping is
+`per-project-tagged` — one shared bank, one tag per repository checkout.
+
+The server is local and self-contained: `hindsight-api` (pipx — pip per the
+upstream docs; brew's python is PEP 668 externally-managed, and pipx is the
+sanctioned per-app wrapper — `brew install pipx` lives in
+`dotfiles/brew.sh`). `install.sh` installs the package when
+`~/.local/bin/hindsight-api` is absent and never touches it after; upgrade by
+hand with `pipx upgrade hindsight-api`. Data lives in `~/.hindsight/data`
+(embedded PostgreSQL); logs in `~/.hindsight/logs/server.log`.
+
+Nothing runs at login: `omp/extensions/hindsight.ts` boots the server on
+`session_start` whenever the configured API URL isn't already serving, and
+reads its own configuration at boot rather than hardcoding it:
+
+- `hindsight.apiUrl` — via `omp config get`, so env and project overrides
+  apply; the URL's port is handed to the server as `HINDSIGHT_API_PORT`.
+- `hindsight.llmProvider` / `hindsight.llmModel` — extra keys in the
+  `hindsight:` block of `omp/config.yml` (omp's schema-closed config registry
+  ignores them; the extension reads the file itself). Current values:
+  `fireworks` + `accounts/fireworks/models/gpt-oss-120b` — the provider
+  default llama-v3p1-8b is not deployed on this account, and gpt-oss-120b is
+  hindsight's recommended extraction model.
+- `HINDSIGHT_API_LLM_API_KEY` — from `.env` at the repo root (gitignored,
+  mode 600), then `.env`'s `FIREWORKS_API_KEY`, then the session's own
+  `FIREWORKS_API_KEY`.
+
+One server is shared by concurrent omp sessions and deliberately outlives
+them; `pkill -f hindsight-api` stops it. The first-ever boot downloads
+~220MB of embedding/reranker models, and omp fails open (no memory, working
+session) whenever the server is unreachable.
 
 ## Cross-vendor review
 

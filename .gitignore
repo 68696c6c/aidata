@@ -2,3 +2,4 @@
 .DS_Store
 .claude/plan-approved
 _notes
+.env

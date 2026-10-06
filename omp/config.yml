@@ -10,3 +10,13 @@ modelRoles:
   default: fireworks/kimi-k3
 dev:
   autoqaConsent: granted
+# Native Hindsight memory backend (omp/docs: memory.md). omp/extensions/
+# hindsight.ts boots the server on session start; data in ~/.hindsight/data.
+memory:
+  backend: hindsight
+hindsight:
+  apiUrl: http://localhost:8888
+  # Server-side LLM settings, consumed by omp/extensions/hindsight.ts at server
+  # boot (omp itself ignores them). The API key is NOT here — aidata/.env.
+  llmProvider: fireworks
+  llmModel: accounts/fireworks/models/gpt-oss-120b

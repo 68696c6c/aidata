@@ -203,8 +203,41 @@ install_omp() {
 
   mkdir -p "$omp_home/extensions"
   link_managed "$REPO/omp/extensions/bell.ts" "$omp_home/extensions/bell.ts"
+  link_managed "$REPO/omp/extensions/hindsight.ts" "$omp_home/extensions/hindsight.ts"
 
   link_managed "$REPO/omp/config.yml" "$omp_home/config.yml"
+}
+
+# --- hindsight memory server: pipx-installed, omp-autostarted ------------------
+#
+# omp's native `memory.backend: hindsight` (omp/config.yml) points every omp
+# session at a Hindsight API, and omp/extensions/hindsight.ts boots that server
+# on session start when it is not already running. The extension sources its
+# own config at boot: hindsight.apiUrl via `omp config get` (omp-resolved, so
+# env/project overrides apply), hindsight.llmProvider/llmModel from the
+# hindsight: block of the user config.yml (omp's schema-closed registry ignores
+# them), and the API key from .env at this repo's root (gitignored, mode 600),
+# falling back to the session's FIREWORKS_API_KEY. What install owns here is
+# the server package itself: hindsight-api, installed with pipx (pip, per
+# upstream docs; brew's python is PEP 668 externally-managed, so pipx is the
+# sanctioned per-app pip wrapper — dotfiles/brew.sh owns the formula).
+# Data lives in ~/.hindsight/data (embedded pg0 PostgreSQL); embedding and
+# reranker models download from HuggingFace on the server's first run.
+# Upgrade by hand: pipx upgrade hindsight-api.
+
+install_hindsight() {
+  local bin="$HOME/.local/bin/hindsight-api"
+  if [ -x "$bin" ]; then
+    n_skipped=$((n_skipped + 1)); return 0
+  fi
+  if ! command -v pipx >/dev/null 2>&1; then
+    warn "pipx is not installed — skipping hindsight-api.
+   It is in dotfiles/brew.sh; install it (brew install pipx) and re-run."
+    return 0
+  fi
+  pipx install hindsight-api
+  say "installed hindsight-api (pipx) -> $bin"
+  n_seeded=$((n_seeded + 1))
 }
 
 # --- CLAUDE.md managed blocks --------------------------------------------------
@@ -479,6 +512,9 @@ install_gate_scripts
 printf '\nomp harness\n'
 install_omp
 install_omp_hook_stub
+
+printf '\nhindsight memory server\n'
+install_hindsight
 
 printf '\npilotfish bootstrap\n'
 seed_pilotfish_agents
