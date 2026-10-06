@@ -28,7 +28,7 @@
 // reach it — which is why `eval` itself is denied in the main session
 // outright. Subagents keep eval because their spawn was the approval.
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, realpathSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";
 
@@ -111,6 +111,21 @@ function realpathOrSelf(p: string): string {
 // omp/hooks and claude/hooks sit next to it.
 const GATE_REAL = realpathOrSelf(GATE_DIR);
 const AIDATA_ROOT = dirname(GATE_REAL);
+
+// OMP_GATE_DEBUG=1 turns on the /tmp/gate-debug.log trace in debug() below.
+// Read from the process env first, then the aidata repo .env — the gate runs
+// in every repo, and .env is the canonical store (2026-10-06). Read once at
+// module load; a missing file is just "off".
+const GATE_DEBUG = (() => {
+  if (process.env.OMP_GATE_DEBUG === "1") return true;
+  try {
+    return readFileSync(resolve(AIDATA_ROOT, ".env"), "utf8")
+      .split("\n")
+      .some((line) => line.trim() === "OMP_GATE_DEBUG=1");
+  } catch {
+    return false;
+  }
+})();
 const PROTECTED_PREFIXES: string[] = [
   `${HOME}/.omp/agent/hooks`,
   `${HOME}/.omp/agent/config.yml`,
@@ -261,7 +276,7 @@ const ARM_HINT = `Present the plan and ask Aaron to arm the gate (mkdir -p .omp 
 // Env-gated debug log: OMP_GATE_DEBUG=1 records lifecycle and gating
 // decisions to /tmp/gate-debug.log. Off by default; never throws.
 function debug(msg: string): void {
-  if (process.env.OMP_GATE_DEBUG !== "1") return;
+  if (!GATE_DEBUG) return;
   try {
     appendFileSync("/tmp/gate-debug.log", `${new Date().toISOString()} ${msg}\n`);
   } catch {
