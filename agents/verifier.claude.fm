@@ -1,0 +1,3 @@
+model: opus
+effort: medium
+disallowedTools: Write, Edit, NotebookEdit, Agent, Workflow
