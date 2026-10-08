@@ -1,0 +1,3 @@
+model: haiku
+effort: low
+tools: Read, Glob, Grep

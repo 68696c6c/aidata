@@ -1,0 +1,2 @@
+model: "@security"
+tools: read, write, edit, bash, grep, glob, web_search, todo
