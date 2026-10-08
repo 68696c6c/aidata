@@ -68,6 +68,18 @@
 # denial that finds no plan path in the prompt still names the session
 # project's directory as the default place to put one.
 #
+# 2026-09-18 (Aaron): the SCANNING and PLAN-SHAPE logic moved out of this
+# file into ../../gate/scan-bash.sh and ../../gate/check-plan.sh, so the OMP
+# write-gate hook (aidata/omp/hooks/write-gate.ts) can share one
+# implementation instead of drifting against a port. What remains here is
+# Claude plumbing: stdin JSON, the opt-out, the agent_id early-allow, the
+# Write/Edit path rules, the spawn gate, and the deny-message framing. The
+# extraction is behavior-preserving — gate/cases.tsv is the characterization
+# corpus recorded against this file BEFORE the move, and gate/test.sh must
+# stay green against it. The scripts are located relative to this file's real
+# path (it is a symlink into the aidata checkout), with ~/.claude/hooks/gate/
+# as fallback; a missing or failing script fails CLOSED.
+#
 # The gate enforces plan approval before CHANGES and nothing else — reading
 # is never gated (Aaron, 2026-08-13). Fail-closed on the write side: while
 # disarmed, Bash is limited to a read-only allowlist of simple commands, and
@@ -88,19 +100,20 @@ PLANS_ROOT="$HOME/.claude/plans"
 PLAN_DIR="$PLANS_ROOT/$PROJECT_NAME"
 PLAN_TEMPLATE="$PLANS_ROOT/TEMPLATE.md"
 
-# The required sections, in the order the template lists them. A plan missing
-# any of these is refused before its bodies are measured, so the denial names
-# the missing heading rather than an empty section.
-PLAN_HEADINGS=(
-  "Goal"
-  "Out of scope"
-  "Design fit"
-  "Decisions"
-  "New surface"
-  "Steps"
-  "Verification"
-  "Fallback"
-)
+# The shared gate scripts live at aidata/gate/; this file is symlinked from
+# ~/.claude/hooks/, so resolve through the symlink to find them. link_managed
+# uses absolute targets, so a single readlink suffices. The fallback path is
+# where install.sh links the scripts for harnesses that cannot resolve the
+# checkout (and where a plain copy of this file, not a symlink, still finds
+# them).
+SELF="${BASH_SOURCE[0]}"
+if [ -L "$SELF" ]; then SELF="$(readlink "$SELF")"; fi
+GATE_DIR="$(cd "$(dirname "$SELF")/../../gate" 2>/dev/null && pwd || true)"
+if [ -z "$GATE_DIR" ] || [ ! -x "$GATE_DIR/scan-bash.sh" ]; then
+  GATE_DIR="$HOME/.claude/hooks/gate"
+fi
+SCAN_BASH="$GATE_DIR/scan-bash.sh"
+CHECK_PLAN="$GATE_DIR/check-plan.sh"
 
 INPUT="$(cat)"
 
@@ -145,9 +158,8 @@ deny_orchestrator() {
 }
 
 deny_plan() {
-  # Same jq construction and the same fail-open reasoning as deny(): $1 quotes
-  # a path and a heading read out of a model-written prompt and file. The
-  # message class differs on purpose (Aaron, 2026-09-08) because neither
+  # Same jq construction and the same fail-open reasoning as deny(), with a
+  # different message on purpose (Aaron, 2026-09-08) because neither
   # arming nor delegation is the remedy here. The remedy is a plan file with
   # the required shape, approved before the spawn.
   jq -cn --arg r "NO APPROVED PLAN: $1. A write-capable spawn requires a plan file under $PLAN_DIR/, or under the plans directory of the project the change belongs to, carrying all eight sections (Goal, Out of scope, Design fit, Decisions, New surface, Steps, Verification, Fallback), 40+ non-whitespace characters in each, and an 'Options:' line under Decisions. Template: $PLAN_TEMPLATE. Write or fix the plan, then ask Aaron to approve it and arm the gate again." \
@@ -183,201 +195,46 @@ is_plans_path() {
   return 1
 }
 
-# Redirect targets and the path arguments of cp/mv/rm-style commands may point
-# anywhere in /tmp, which is scratch by construction and subsumes the
-# scratchpad prefixes above. /private/tmp is the same directory as /tmp on
-# macOS (/tmp is a symlink to it), so both spellings carry the same
-# permission. Everything else, a relative path included, is outside.
-is_bash_write_path() {
-  case "$1" in
-    *..*) return 1 ;;
-    /tmp/* | /private/tmp/*) return 0 ;;
-  esac
+# scan_command runs the shared scanner and translates its verdict contract
+# (aidata/gate/scan-bash.sh) back into this file's deny functions. $1 =
+# --orchestrator | --disarmed, $2 = the raw command. exit 0 = allow. On
+# denial, SCAN_CLASS is "orchestrator" or "disarmed" and SCAN_REASON is the
+# core reason, exactly the text the pre-extraction code passed to deny*(). A
+# scanner error is reported as class "orchestrator" so it can never be read
+# as "blocked only while disarmed" — fail closed with the framing whose
+# remedy is not "arm the gate".
+SCAN_CLASS=""
+SCAN_REASON=""
+scan_command() {
+  local out rc=0
+  out="$(printf '%s' "$2" | bash "$SCAN_BASH" "$1" 2>/dev/null)" || rc=$?
+  if [ "$rc" -eq 0 ]; then return 0; fi
+  if [ "$rc" -ne 1 ]; then
+    SCAN_CLASS="orchestrator"
+    SCAN_REASON="the shared gate scanner at $SCAN_BASH exited $rc; failing closed (run aidata install.sh if it is missing)"
+    return 1
+  fi
+  SCAN_CLASS="${out%%$'\t'*}"
+  SCAN_REASON="${out#*$'\t'}"
   return 1
-}
-
-# A redirection writes a file unless its target is scratch space or /dev/null.
-# Descriptor moves (2>&1, >&2, 1>&2) move a fd and write nothing. A target
-# that cannot be resolved to an allowed prefix fails CLOSED, including a
-# target hidden inside quotes, which the disarmed allowlist below already
-# refuses for the same reason.
-check_redirects() {
-  local tok target
-  while [ "$#" -gt 0 ]; do
-    tok="$1"
-    shift
-    case "$tok" in
-      *'>'*) ;;
-      *) continue ;;
-    esac
-    case "$tok" in
-      '>&'[0-9] | [0-9]'>&'[0-9] | '&>&'[0-9]) continue ;;
-    esac
-    target="${tok#[0-9]}"
-    target="${target#&}"
-    target="${target#>}"
-    target="${target#>}"
-    target="${target#|}"
-    if [ -z "$target" ]; then
-      target="${1:-}"
-      [ "$#" -gt 0 ] && shift
-    fi
-    case "$target" in
-      /dev/null) continue ;;
-    esac
-    if is_bash_write_path "$target"; then
-      continue
-    fi
-    deny_orchestrator "a redirection writing to '${target:-an unreadable target}'"
-  done
-}
-
-# Every path argument of a file-moving command has to land in scratch space.
-# An argument starting with - is a flag; anything else is treated as a path,
-# so a relative path is outside by definition. A mode or owner argument (the
-# 755 of chmod) reads as a relative path here and is refused with it; that is
-# the fail-closed side of the same rule.
-check_path_args() {
-  local name tok prev
-  name="$1"
-  shift
-  prev=""
-  while [ "$#" -gt 0 ]; do
-    tok="$1"
-    shift
-    case "$prev" in
-      *'>')
-        # consumed as the target of a redirection, already checked above
-        prev="$tok"
-        continue
-        ;;
-    esac
-    prev="$tok"
-    case "$tok" in
-      -* | *'>'*) continue ;;
-    esac
-    if is_bash_write_path "$tok"; then
-      continue
-    fi
-    deny_orchestrator "$name with the path '$tok' outside scratch space"
-  done
-}
-
-# `\rm`, "rm" and /bin/rm all run rm, so the command word is normalized before
-# it is compared. A deny list that skips normalization is walked past by a
-# quoting trick, which is the bypass class found live on 2026-08-31 when
-# '\mkdir x' sailed through the allowlist. Sets NORM rather than echoing,
-# because a command substitution would run in a subshell and a denial there
-# could not exit the hook.
-NORM=""
-normalize_word() {
-  NORM="${1//\\/}"
-  NORM="${NORM//\"/}"
-  NORM="${NORM//\'/}"
-  NORM="${NORM##*/}"
-}
-
-# Constructs the orchestrator may never run, checked in the same shape the
-# disarmed allowlist below uses: split the compound on | ; && || and read the
-# leading word(s) of each simple command. Newlines already separate segments,
-# so a heredoc body is examined as its own segment. Substitution boundaries
-# ($( , <( , backtick and the closing paren) split too: `echo $(rm -rf x)`
-# runs rm, so rm has to be read as the leading word of a segment of its own.
-orchestrator_bash_scan() {
-  local normalized seg first sub
-  normalized="$(printf '%s' "$1" | sed -E 's/\|\||&&|;|\||\$\(|<\(|\)|`/\n/g')"
-
-  while IFS= read -r seg; do
-    seg="${seg#"${seg%%[![:space:]]*}"}"
-    [ -z "$seg" ] && continue
-    # shellcheck disable=SC2086
-    check_redirects $seg
-
-    # shellcheck disable=SC2086
-    set -- $seg
-    # A leading command/env/nohup/time/sudo/xargs word or a VAR=value
-    # assignment only prefixes the real command word; step over them to reach
-    # it, so `xargs rm <path>` is read as rm.
-    while [ "$#" -gt 0 ]; do
-      case "$1" in
-        command | env | nohup | time | sudo | xargs | *=*) shift ;;
-        *) break ;;
-      esac
-    done
-    normalize_word "${1:-}"
-    first="$NORM"
-
-    case "$first" in
-      python | python[0-9]* | perl | ruby | node | nodejs | bun | deno | php)
-        # Any form writes files: a script file, -c, -e, a - stdin script or a
-        # heredoc. The interpreter itself is the construct being refused.
-        deny_orchestrator "the interpreter '$first', which can write files in any form"
-        ;;
-      tee | truncate | dd | install | rsync | patch)
-        deny_orchestrator "the file-writing command '$first'"
-        ;;
-      sed)
-        case "$seg" in
-          *" -i"* | *" --in-place"*) deny_orchestrator "sed in-place editing" ;;
-        esac
-        ;;
-      cp | mv | rm | mkdir | touch | ln | chmod | chown | rmdir)
-        shift
-        check_path_args "$first" "$@"
-        ;;
-      find)
-        # Same rule the disarmed allowlist below already applies to find, for
-        # the same reason: -delete and -exec turn a search into a write.
-        case "$seg" in
-          *-delete* | *-exec*) deny_orchestrator "find with -delete or -exec" ;;
-        esac
-        ;;
-      git)
-        # Skip the global options to find the real subcommand, keeping the
-        # ones that take a value in a separate word paired with it.
-        shift
-        while [ "$#" -gt 0 ]; do
-          case "$1" in
-            -C | -c | --git-dir | --work-tree | --namespace | --exec-path | --config-env)
-              shift 2 || break
-              ;;
-            -*) shift ;;
-            *) break ;;
-          esac
-        done
-        normalize_word "${1:-}"
-        sub="$NORM"
-        case "$sub" in
-          add | commit | cherry-pick | rebase | merge | apply | am | revert | reset | restore | checkout | switch | stash | worktree | pull | tag | rm | mv | clean | init | clone | notes | filter-branch | replace | update-ref | symbolic-ref)
-            deny_orchestrator "git $sub, which changes a working tree or git history"
-            ;;
-          branch)
-            case "$seg" in
-              *" -D"* | *" -d"* | *" -m"* | *" -M"* | *" -f"* | *" --force"* | *" --delete"* | *" --move"*)
-                deny_orchestrator "git branch mutation"
-                ;;
-            esac
-            ;;
-        esac
-        ;;
-    esac
-  done <<EOF_SEGMENTS
-$normalized
-EOF_SEGMENTS
 }
 
 # ---------------------------------------------------------------------------
 # Orchestrator-only enforcement (Aaron, 2026-09-08), ahead of the armed
-# early-allow so the marker cannot lift it. Everything not refused here is
-# left to the marker and, while disarmed, to the read-only allowlist below:
-# git push, git fetch, gh, docker, make, op, aws, curl and process control
-# stay allowed when armed, because shipping is the orchestrator's job.
+# early-allow so the marker cannot lift it. The Write/Edit path rules are
+# local; the Bash scan is the shared scanner's --orchestrator mode, which
+# refuses interpreters, file-writing commands, in-place sed, mutating git,
+# and movers or redirects outside scratch space. Everything not refused is
+# left to the marker and, while disarmed, to the read-only allowlist in the
+# scanner's --disarmed mode: git push, git fetch, gh, docker, make, op, aws,
+# curl and process control stay allowed when armed, because shipping is the
+# orchestrator's job.
 #
 # Build tools (pnpm, npm, go, make) stay allowed too, on the grounds that they
 # write only inside node_modules, dist and build caches of a worktree an
 # executor owns. That is a judgment call about blast radius rather than a
-# guarantee, and Aaron may tighten it later; a tightening belongs in the scan
-# below, next to the interpreters.
+# guarantee, and Aaron may tighten it later; a tightening belongs in the
+# scanner, next to the interpreters.
 # ---------------------------------------------------------------------------
 case "$TOOL" in
   Write | Edit | NotebookEdit)
@@ -406,13 +263,12 @@ case "$TOOL" in
     ;;
   Bash)
     CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')"
-    # Stderr-only redirects (2>/dev/null, 2>&1) cannot write files, so strip
-    # them once here (Aaron, 2026-08-21: reading is never gated). Both the
-    # orchestrator scan and the disarmed redirection test read the stripped
-    # copy.
-    CMD_REDIR_TEST="${CMD//2>\/dev\/null/}"
-    CMD_REDIR_TEST="${CMD_REDIR_TEST//2>&1/}"
-    orchestrator_bash_scan "$CMD_REDIR_TEST"
+    if [ ! -x "$SCAN_BASH" ]; then
+      deny_orchestrator "the shared gate scanner is missing at $SCAN_BASH; run aidata install.sh to link it"
+    fi
+    if ! scan_command --orchestrator "$CMD"; then
+      deny_orchestrator "$SCAN_REASON"
+    fi
     ;;
 esac
 
@@ -435,38 +291,16 @@ re_escape() {
   printf '%s' "$1" | sed -E 's/[][(){}.^$*+?|\\]/\\&/g'
 }
 
-# BSD stat and GNU stat spell the modification time differently, so try the
-# macOS form first and fall back to the GNU one. Prints nothing if neither
-# works, which the caller treats as a failure. -L follows a symlink to its
-# target: BSD stat reports the link's own mtime otherwise, which would let a
-# plan symlinked before arming have its target rewritten after it and still
-# read as fresh.
-file_mtime() {
-  stat -L -f %m "$1" 2>/dev/null || stat -L -c %Y "$1" 2>/dev/null || true
-}
-
-# Prints the body of one `## ` section: every line after the heading up to the
-# next `## ` heading or EOF. Sections may appear in any order, so the walk
-# tracks which heading it is inside rather than counting.
-plan_section() {
-  awk -v want="$2" '
-    /^## / {
-      name = substr($0, 4)
-      sub(/[[:space:]]+$/, "", name)
-      inside = (name == want)
-      next
-    }
-    inside { print }
-  ' "$1"
-}
-
 # The plan-file rule (Aaron, 2026-09-08). Called only for a write-capable
 # Agent spawn from the main session with the marker already in place, so the
 # arming message still comes first while disarmed and the marker check stays
-# the outer gate. Every failure exits through deny_plan naming the one check
-# that failed; falling off the end means the plan is valid.
+# the outer gate. Path EXTRACTION from the prompt is local to this file (the
+# OMP gate extracts from task text instead); the shape, freshness and ".."
+# checks all live in the shared checker. Every failure exits through
+# deny_plan naming the one check that failed; falling off the end means the
+# plan is valid.
 check_plan_file() {
-  local prompt plan_re plan heading body nws marker_mtime plan_mtime newest
+  local prompt plan_re plan newest out rc
 
   prompt="$(printf '%s' "$INPUT" | jq -r '.tool_input.prompt // empty')"
 
@@ -476,7 +310,8 @@ check_plan_file() {
   # exclude / and whitespace, which keeps the match exactly one directory
   # under the plans root and lets trailing punctuation in prose fall outside
   # it. The project segment is any name (the 2026-09-08 follow-up), so the
-  # ".." refusal below is what keeps the cited plan inside the plans root.
+  # ".." refusal in the shared checker is what keeps the cited plan inside
+  # the plans root.
   plan_re="($(re_escape "$HOME")|~)/\\.claude/plans/[^[:space:]/]+/[^[:space:]/]+\\.md"
   plan="$(printf '%s' "$prompt" | grep -oE "$plan_re" | head -n 1 || true)"
 
@@ -494,49 +329,18 @@ check_plan_file() {
     '~'/*) plan="$HOME/${plan#\~/}" ;;
   esac
 
-  # A project segment of ".." points the citation out of the plans root
-  # altogether, so it is refused rather than resolved, the same way the three
-  # path tests above refuse it.
-  case "$plan" in
-    *..*) deny_plan "the plan path '$plan' holds '..', which is refused rather than resolved" ;;
-  esac
-
-  if [ ! -f "$plan" ]; then
-    deny_plan "the plan file '$plan' named in the prompt is not an existing regular file"
+  if [ ! -x "$CHECK_PLAN" ]; then
+    deny_plan "the shared plan checker is missing at $CHECK_PLAN; run aidata install.sh to link it"
   fi
-
-  for heading in "${PLAN_HEADINGS[@]}"; do
-    if ! grep -qE "^## $heading[[:space:]]*\$" "$plan"; then
-      deny_plan "'$plan' has no '## $heading' heading"
-    fi
-  done
-
-  for heading in "${PLAN_HEADINGS[@]}"; do
-    body="$(plan_section "$plan" "$heading")"
-    nws="$(printf '%s' "$body" | tr -d '[:space:]' | wc -c)"
-    nws="${nws//[[:space:]]/}"
-    if [ "$nws" -lt 40 ]; then
-      deny_plan "the '$heading' section of '$plan' holds $nws non-whitespace characters, under the 40 required"
-    fi
-  done
-
-  # A here-string, not a pipe: with pipefail a producer killed by SIGPIPE when
-  # grep -q exits early would set the pipeline's status and invert this test.
-  body="$(plan_section "$plan" "Decisions")"
-  if ! grep -qiE '^[[:space:]]*([-*]|[0-9]+\.)?[[:space:]]*Options:' <<<"$body"; then
-    deny_plan "the 'Decisions' section of '$plan' has no 'Options:' line, so no alternatives were written down"
+  rc=0
+  out="$(bash "$CHECK_PLAN" "$plan" "$MARKER" 2>/dev/null)" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    return 0
   fi
-
-  # Freshness: approval covers the bytes Aaron read. A plan edited after the
-  # marker was touched has not been approved in its current form.
-  marker_mtime="$(file_mtime "$MARKER")"
-  plan_mtime="$(file_mtime "$plan")"
-  if [ -z "$marker_mtime" ] || [ -z "$plan_mtime" ]; then
-    deny_plan "the modification time of '$plan' or of the approval marker could not be read"
+  if [ "$rc" -ne 1 ]; then
+    deny_plan "the shared plan checker at $CHECK_PLAN exited $rc; failing closed"
   fi
-  if [ "$marker_mtime" -lt "$plan_mtime" ]; then
-    deny_plan "plan modified after arming: '$plan' is newer than the approval marker; arm again"
-  fi
+  deny_plan "$out"
 }
 
 # ---------------------------------------------------------------------------
@@ -585,108 +389,17 @@ case "$TOOL" in
     ;;
 esac
 
-# Redirections and substitutions can smuggle writes through read-only tools.
-# CMD and its stderr-stripped copy were read in the orchestrator branch above.
-case "$CMD_REDIR_TEST" in
-  *'>'* | *'$('* | *'<('* | *'`'*)
-    deny "Bash with redirection or substitution is blocked while disarmed (read-only simple commands only)"
-    ;;
-esac
-
-# Validate every simple command in the pipeline/compound: split on | ; && ||
-# and require each segment's leading word(s) to be on the read-only allowlist.
-NORMALIZED="$(printf '%s' "$CMD" | sed -E 's/\|\||&&|;|\|/\n/g')"
-
-while IFS= read -r seg; do
-  seg="${seg#"${seg%%[![:space:]]*}"}"
-  [ -z "$seg" ] && continue
-  # shellcheck disable=SC2086
-  set -- $seg
-  [ "${1:-}" = "command" ] && shift
-  first="${1:-}"
-  second="${2:-}"
-
-  case "$first" in
-    ls | cat | head | tail | wc | grep | rg | ugrep | file | stat | pwd | which | tree | jq | awk | sort | uniq | cut | tr | column | diff | echo | printf | date | true | lsof | ps | basename | dirname | sleep | cmp | xxd | strings | uname | df | du)
-      continue
-      ;;
-    sed)
-      case "$seg" in
-        *" -i"*) deny "sed -i is blocked while disarmed (in-place edit)" ;;
-      esac
-      continue
-      ;;
-    curl)
-      case "$seg" in
-        *" -X GET"* | *" -X HEAD"*) : ;;
-        *" -X "* | *" --request"* | *" --data"* | *" -d "* | *" -F "* | *" --form"* | *" -T "* | *" --upload-file"*)
-          deny "curl with a mutating method or body is blocked while disarmed"
-          ;;
-      esac
-      case "$seg" in
-        *" -o /dev/null"*) : ;;
-        *" -o "* | *" --output"*) deny "curl -o to a file is blocked while disarmed" ;;
-      esac
-      continue
-      ;;
-    find)
-      case "$seg" in
-        *-delete* | *-exec*) deny "find with -delete/-exec is blocked while disarmed" ;;
-      esac
-      continue
-      ;;
-    git)
-      # `git -C <path> <sub>` is the same read against another checkout
-      # (Aaron, 2026-08-21). Skip -C/path pairs to find the real subcommand.
-      shift
-      while [ "${1:-}" = "-C" ]; do shift 2 || break; done
-      second="${1:-}"
-      case "$second" in
-        status | log | diff | show | rev-parse | blame | ls-files | shortlog | describe | check-ignore | push | reflog | ls-remote | show-ref | cat-file | merge-base | fetch)
-          continue
-          ;;
-        branch)
-          case "$seg" in
-            *" -D"* | *" -d"* | *" -m"* | *" -M"* | *" -f"* | *" --force"* | *" --delete"* | *" --move"*)
-              deny "git branch mutation is blocked while disarmed"
-              ;;
-          esac
-          continue
-          ;;
-        *) deny "git $second is blocked while disarmed (read-only git subcommands only)" ;;
-      esac
-      ;;
-    gh)
-      case "$second ${3:-}" in
-        "pr view" | "pr list" | "pr diff" | "pr checks" | "pr status" | "release list" | "release view" | "run list" | "run view" | "pr create" | "pr edit" | "run rerun" | "issue view" | "issue list")
-          continue
-          ;;
-        "api "*)
-          # GETs only: an explicit method or any field/input flag mutates.
-          case "$seg" in
-            *" -X "* | *" --method"* | *" -f "* | *" -F "* | *" --field"* | *" --raw-field"* | *" --input"*)
-              deny "gh api with a method or fields is blocked while disarmed"
-              ;;
-          esac
-          continue
-          ;;
-        *) deny "gh $second is blocked while disarmed (read-only gh subcommands only)" ;;
-      esac
-      ;;
-    docker)
-      case "$second ${3:-}" in
-        "ps "* | "ps" | "images "* | "images" | "inspect "* | "compose ps" | "compose logs" | "compose images")
-          continue
-          ;;
-        *) deny "docker $second is blocked while disarmed" ;;
-      esac
-      ;;
-    *)
-      deny "Bash command starting with $first is not on the disarmed read-only allowlist"
-      ;;
-  esac
-done <<EOF_SEGMENTS
-$NORMALIZED
-EOF_SEGMENTS
+# Disarmed Bash: the shared scanner's --disarmed mode, which composes the
+# orchestrator scan with the read-only allowlist (redirection/substitution
+# pre-check included). The scanner ran --orchestrator above already, so an
+# orchestrator-class reason here is unreachable; the branch is kept anyway
+# because a wrong frame would tell the model to arm the gate for a denial
+# arming cannot lift.
+if ! scan_command --disarmed "$CMD"; then
+  if [ "$SCAN_CLASS" = "orchestrator" ]; then
+    deny_orchestrator "$SCAN_REASON"
+  fi
+  deny "$SCAN_REASON"
+fi
 
 exit 0
