@@ -91,6 +91,33 @@ link_managed() {
   n_linked=$((n_linked + 1))
 }
 
+# link_managed_dir SRC DEST — link_managed for directories: symlink, never
+# clobber. A real directory at DEST is treated as a hand-created install and
+# is reported, never merged or replaced.
+link_managed_dir() {
+  local src="$1" dest="$2"
+
+  if [ -L "$dest" ]; then
+    if [ "$(readlink "$dest")" = "$src" ]; then
+      n_skipped=$((n_skipped + 1)); return 0
+    fi
+    warn "$dest is a symlink to $(readlink "$dest"), not to $src.
+   Not touching it. Remove it by hand if you want aidata to manage this path."
+    return 0
+  fi
+
+  if [ -e "$dest" ]; then
+    warn "$dest exists and is not an aidata symlink — NOT replaced.
+   inspect:  ls '$dest'
+   replace:  rm -rf '$dest' && ./install.sh"
+    return 0
+  fi
+
+  ln -s "$src" "$dest"
+  say "linked   $dest"
+  n_linked=$((n_linked + 1))
+}
+
 # --- shared gate scripts -------------------------------------------------------
 #
 # aidata/gate/ holds the single-source scanners both harnesses execute
@@ -238,6 +265,35 @@ install_hindsight() {
   pipx install hindsight-api
   say "installed hindsight-api (pipx) -> $bin"
   n_seeded=$((n_seeded + 1))
+}
+
+# --- skills: one source, linked into both harnesses ---------------------------
+#
+# skills/<name>/SKILL.md follows the agentskills layout (name + description
+# frontmatter; omp's native skill provider requires the description). Each
+# skill DIRECTORY is linked — into ~/.claude/skills/ for Claude Code and
+# ~/.omp/agent/skills/ for omp — rather than the file, so skill-relative
+# assets keep resolving (omp serves them as skill://<name>/<path>). Both links
+# point at the repo, so the two harnesses read one file on disk. Adding a
+# skill is dropping a directory in skills/ and re-running install.sh.
+
+install_skills() {
+  local skill name
+  local claude_skills="$CLAUDE_HOME/skills"
+  local omp_home="$HOME/.omp/agent"
+
+  for skill in "$REPO"/skills/*/; do
+    [ -f "$skill/SKILL.md" ] || continue
+    name="$(basename "$skill")"
+
+    mkdir -p "$claude_skills"
+    link_managed_dir "${skill%/}" "$claude_skills/$name"
+
+    if [ -d "$omp_home" ]; then
+      mkdir -p "$omp_home/skills"
+      link_managed_dir "${skill%/}" "$omp_home/skills/$name"
+    fi
+  done
 }
 
 # --- CLAUDE.md managed blocks --------------------------------------------------
@@ -515,6 +571,9 @@ install_omp_hook_stub
 
 printf '\nhindsight memory server\n'
 install_hindsight
+
+printf '\nskills\n'
+install_skills
 
 printf '\npilotfish bootstrap\n'
 seed_pilotfish_agents

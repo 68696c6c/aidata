@@ -27,11 +27,16 @@ Hand-rolled shell and symlinks. No Dotbot, no framework, no dependencies beyond
 | `omp/agents/reviewer.md` | `~/.omp/agent/agents/reviewer.md` | link |
 | `omp/agents/verifier.md` | `~/.omp/agent/agents/verifier.md` | link |
 | `omp/config.yml` | `~/.omp/agent/config.yml` | link |
+| `skills/<name>/` (each) | `~/.claude/skills/<name>/` | link (whole dir) |
+| `skills/<name>/` (each) | `~/.omp/agent/skills/<name>/` | link (whole dir) |
 
 Four mechanisms, four different ownership rules:
 
 - **link** — symlink into the repo. The repo owns it. Edit either path; it is
-  one file on disk.
+  one file on disk. Skills are the one exception to file-granularity: each
+  `skills/<name>/` directory is linked whole, so skill-relative assets
+  resolve through it (omp serves them as `skill://<name>/<path>`). Adding a
+  skill is dropping a directory in `skills/` and re-running `./install.sh`.
 - **block** — a marker-delimited span inside a file aidata does not otherwise
   own. Every `claude/claude-md.d/*.md` file is a self-describing fragment: its
   first and last lines are its own `<!-- aidata:<slug>:begin/end -->` markers,
