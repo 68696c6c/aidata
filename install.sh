@@ -41,6 +41,17 @@ AIDATA_MARKER_RE='^<!-- aidata:[a-z0-9-]+:begin -->$'
 
 PILOTFISH_BLOCK="$REPO/pilotfish/claude-md-block.md"
 
+# External skill roots, as harness|root pairs consumed by
+# install_external_skills below: skills that live in checkouts aidata does
+# not own, linked into the harness skill dirs in place. A root either IS one
+# skill (SKILL.md at its top) or CONTAINS skills (one per child directory).
+EXTERNAL_SKILL_ROOTS=(
+  "claude|$HOME/Code/mattpocock-skills/skills/engineering"
+  "claude|$HOME/Code/mattpocock-skills/skills/productivity"
+  "claude|$HOME/Code/pm/contrib/ticket-ledger"
+  "omp|$HOME/Code/pm/contrib/ticket-ledger"
+)
+
 n_linked=0; n_seeded=0; n_skipped=0; n_warned=0
 
 say()  { printf '  %s\n' "$*"; }
@@ -448,6 +459,74 @@ install_skills() {
   done
 }
 
+# --- external skill roots: linked in place, never vendored --------------------
+#
+# Skills that live in checkouts aidata does not own (EXTERNAL_SKILL_ROOTS at
+# the top, harness|root pairs). Two root shapes, one loop: a root that IS a
+# skill (SKILL.md at its top: pm's contrib/ticket-ledger) and a root whose
+# CHILDREN are skills (the mattpocock category dirs). A missing or skill-less
+# root warns and skips rather than failing: a fresh machine without those
+# clones must still install everything else, and the warning is the drift
+# alarm.
+#
+# The mattpocock skills reach omp through PR #7's skills.customDirectories in
+# omp/config.yml, so only Claude gets symlinks for them: linking them into
+# ~/.omp/agent/skills too would double-load every one. ticket-ledger takes
+# the opposite path, symlinked into BOTH harnesses rather than added to
+# customDirectories, so one mechanism covers it and the omp config stays
+# trial-scoped to mattpocock. Linking reuses link_managed_dir, so a real
+# directory or a foreign symlink at the destination is reported loudly and
+# never clobbered.
+
+install_external_skills() {
+  local entry harness root dest_root skill name found
+  local claude_skills="$CLAUDE_HOME/skills"
+  local omp_home="$HOME/.omp/agent"
+
+  for entry in "${EXTERNAL_SKILL_ROOTS[@]}"; do
+    harness="${entry%%|*}"
+    root="${entry#*|}"
+
+    case "$harness" in
+      claude)
+        dest_root="$claude_skills" ;;
+      omp)
+        # Same doctrine as install_skills: no omp home, no warning.
+        [ -d "$omp_home" ] || continue
+        dest_root="$omp_home/skills" ;;
+      *)
+        warn "external skill root '$entry' names unknown harness '$harness'. Skipping."
+        continue ;;
+    esac
+
+    if [ ! -d "$root" ]; then
+      warn "external skill root $root is missing ($harness), skipping.
+   Clone or check out that repo, then re-run ./install.sh."
+      continue
+    fi
+
+    if [ -f "$root/SKILL.md" ]; then
+      # Root IS one skill.
+      mkdir -p "$dest_root"
+      link_managed_dir "$root" "$dest_root/$(basename "$root")"
+      continue
+    fi
+
+    # Root CONTAINS skills, one per child directory.
+    found=0
+    for skill in "$root"/*/; do
+      [ -f "$skill/SKILL.md" ] || continue
+      found=1
+      name="$(basename "$skill")"
+      mkdir -p "$dest_root"
+      link_managed_dir "${skill%/}" "$dest_root/$name"
+    done
+    if [ "$found" -eq 0 ]; then
+      warn "external skill root $root has no SKILL.md at its top or one level down ($harness), skipping."
+    fi
+  done
+}
+
 # --- CLAUDE.md managed blocks --------------------------------------------------
 #
 # Every claude/claude-md.d/*.md file is a self-describing fragment: its first
@@ -718,6 +797,9 @@ install_hindsight
 
 printf '\nskills\n'
 install_skills
+
+printf '\nexternal skills\n'
+install_external_skills
 
 printf '\nagent roles\n'
 install_agents

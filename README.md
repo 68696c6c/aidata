@@ -64,6 +64,45 @@ from the repo copy is left exactly as it is, reported loudly with a diff command
 and both resolutions, and the run exits non-zero. Re-running after a clean
 install is a no-op.
 
+## External skill roots
+
+Skills that live in checkouts aidata does not own are linked in by the same
+whole-directory mechanism as `skills/`, configured in `EXTERNAL_SKILL_ROOTS`
+at the top of `install.sh` as `harness|root` pairs. A root either is one
+skill (`SKILL.md` at its top) or contains skills (one per child directory);
+`install_external_skills()` handles both shapes in one loop. A missing or
+skill-less root warns and skips, so a fresh machine without those clones
+still installs everything else. Nothing is vendored: both harnesses read the
+external checkout in place through the symlink, and a hand-created directory
+or a foreign symlink at a target name is reported, never clobbered.
+
+Current roots:
+
+- `~/Code/mattpocock-skills/skills/{engineering,productivity}`, Claude only:
+  the [mattpocock/skills](https://github.com/mattpocock/skills) trial. omp
+  sees these through `skills.customDirectories` in `omp/config.yml` (PR #7,
+  branch `feat/mattpocock-skills-trial`), so install links them into
+  `~/.claude/skills/` only; linking them into omp as well would double-load
+  every skill in that harness.
+- `~/Code/pm/contrib/ticket-ledger`, both harnesses: per-ticket token, cost,
+  and time tracking for agent sessions. It is symlinked into
+  `~/.omp/agent/skills/` rather than added to `customDirectories`, so one
+  mechanism covers it and the omp config stays trial-scoped to mattpocock.
+  The skill file itself lives in the pm repo, next to the tool it documents.
+
+ticket-ledger's capture side is provisioned once by hand from its own
+checkout; this installer only links the skill:
+
+```sh
+~/Code/pm/contrib/ticket-ledger/install.sh --apply
+```
+
+That links the `ticket-*` commands into `~/.local/bin`, merges a `statusLine`
+plus `SessionStart`/`SessionEnd` hooks into `~/.claude/settings.json`
+(backing the file up first; the merge is add-only, so aidata's four hook
+entries are untouched), and adds the daily ledger-backup line to the crontab.
+Usage and design: `contrib/ticket-ledger/README.md` in the pm checkout.
+
 ## New machine
 
 ```sh
