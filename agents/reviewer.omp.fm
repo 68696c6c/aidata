@@ -1,0 +1,4 @@
+# model: is the experiment knob. Swap this one line to trial a
+# different model; nothing else in this role is model-specific.
+model: "@review, fireworks/kimi-k3"
+tools: read, grep, glob, bash

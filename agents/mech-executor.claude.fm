@@ -1,0 +1,3 @@
+model: sonnet
+effort: low
+disallowedTools: Agent, Workflow

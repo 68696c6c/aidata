@@ -1,0 +1,5 @@
+# model: is the experiment knob. Swap this one line to trial a
+# different model; nothing else in this role is model-specific.
+model: opus
+effort: medium
+tools: Read, Glob, Grep, Bash
