@@ -237,8 +237,10 @@ probed live 2026-09-18):
   artifact directory), so a classification failure degrades toward gating.
 - **`turn_end` fires per model step, not per user turn** — the disarm lives
   on `agent_end` (the Stop-hook analog) with `session_shutdown` as backstop.
-  The marker is `<repo>/.omp/plan-approved`; arm with
-  `mkdir -p .omp && touch .omp/plan-approved`.
+  The marker is `<repo>/.claude/plan-approved` — shared with the Claude gate
+  since 2026-10-09: one file per repo, arm once with
+  `touch .claude/plan-approved` and whichever harness you run is armed;
+  either harness's turn end disarms it.
 - **The main session is the orchestrator.** Reads flow; write/edit are
   refused except under `~/.claude/plans/` (the shared plans root — a plan
   belongs to the project, not the harness); `eval` is refused outright (a
