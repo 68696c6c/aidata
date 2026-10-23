@@ -200,6 +200,30 @@ and omp itself auto-loads a launch-directory `.env` for unset keys — so
 sessions started in this repo pick all three up natively — added 2026-10-06
 at the user's direction.
 
+### Third-party skills trial (mattpocock/skills)
+
+A trial of [mattpocock/skills](https://github.com/mattpocock/skills) runs
+alongside the aidata skills without touching them. The clone lives OUTSIDE
+this repo at `~/Code/mattpocock-skills` (update it there with `git pull`;
+it is not aidata-managed), and `omp/config.yml` points omp's
+`skills.customDirectories` at its `skills/engineering` and
+`skills/productivity` directories — omp scans one level under each and
+requires `name` + `description` frontmatter, which all of them carry. The
+same block sets `skills.enableSkillCommands: true`, so every discovered skill
+(aidata's included) also gets a `/skill:<name>` slash command.
+
+- **Swap back to stock:** comment out the two `customDirectories` lines in
+  `omp/config.yml` (the block is marked with a comment saying so). Sessions
+  read config at launch, so the next `omp` run is back to aidata skills only.
+- **Precedence:** custom-directory skills override same-named provider
+  skills. No current collisions with `skills/`; if one appears, the
+  mattpocock version wins while the trial is on.
+- **Trimming the set:** add `skill:<name>` entries to `disabledExtensions`
+  in `omp/config.yml`, or delete skill directories from the clone.
+- **Per-repo setup:** his tracker/docs-driven skills (`triage`, `to-tickets`,
+  …) expect `/skill:setup-matt-pocock-skills` to have been run once in that
+  repo; it records issue tracker, labels, and docs location.
+
 ### The omp write gate
 
 `omp/hooks/write-gate.ts` closes what used to be the known gap: an omp

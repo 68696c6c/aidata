@@ -20,3 +20,12 @@ hindsight:
   # boot (omp itself ignores them). The API key is NOT here — aidata/.env.
   llmProvider: fireworks
   llmModel: accounts/fireworks/models/gpt-oss-120b
+# mattpocock/skills trial — clone at ~/Code/mattpocock-skills (update: git pull
+# there). omp scans one level under each custom directory; these skills
+# override same-named stock skills. Swap back to stock: comment out the two
+# customDirectories lines.
+skills:
+  enableSkillCommands: true
+  customDirectories:
+    - /Users/aaronhill/Code/mattpocock-skills/skills/engineering
+    - /Users/aaronhill/Code/mattpocock-skills/skills/productivity
