@@ -20,11 +20,11 @@ are wanted, they run separately.
 
 ## Loading protocol — before reading a single line of the diff
 
-1. Read `~/.claude/review/global.md`. ALWAYS. It is the contract for severity,
+1. Read `~/.agents/review/global.md`. ALWAYS. It is the contract for severity,
    evidence, and output.
-2. Read `~/.claude/review/go.md` if a `go.mod` exists at the repo root or one
+2. Read `~/.agents/review/go.md` if a `go.mod` exists at the repo root or one
    directory below it (monorepos keep it in `api/` etc.). Load any other
-   `~/.claude/review/<language>.md` the same way, when its language is in the
+   `~/.agents/review/<language>.md` the same way, when its language is in the
    diff.
 3. Read every `*.md` under `<repo-root>/.claude/review/`.
 4. Legacy fallback: if `<repo-root>/.claude/review/` does not exist, read the

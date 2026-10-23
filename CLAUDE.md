@@ -12,8 +12,8 @@ Professional software engineering work across a polyglot stack for multiple clie
 
 Code rules live in the layered review doctrine, which is the current source:
 
-- `~/.claude/review/global.md`, the section "Portable rules that outrank style" (rules for every language)
-- `~/.claude/review/go.md` (the Go layer, for any repo with a `go.mod` at its root or one directory below)
+- `~/.agents/review/global.md`, the section "Portable rules that outrank style" (rules for every language)
+- `~/.agents/review/go.md` (the Go layer, for any repo with a `go.mod` at its root or one directory below)
 - the repo's own `.claude/review/*.md` (the project layer, when present)
 
 Read the layers that apply before writing or changing code. The `reviewer` role grades the diff against the same files. The polyglot bullets below stay because only Go has a language layer of its own; where one of them and the doctrine speak to the same point, the doctrine's wording wins.

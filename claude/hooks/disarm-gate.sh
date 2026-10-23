@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Disarms the approval gate (Aaron, 2026-08-13) by removing the
-# .claude/plan-approved marker, so an approval never outlives the turn it was
+# .agents/plan-approved marker, so an approval never outlives the turn it was
 # given for. Wired to the Stop hook.
 #
 # Canonical copy lives in aidata (claude/hooks/disarm-gate.sh) and is symlinked
@@ -9,9 +9,14 @@
 # arrives as $1 via the hook's exec-form args (${CLAUDE_PROJECT_DIR}).
 #
 # 2026-08-31 (Aaron): the gate is user-global by default, with a per-repo
-# opt-out — a repo whose root holds .claude/no-approval-gate is exempt. An
+# opt-out — a repo whose root holds .agents/no-approval-gate is exempt. An
 # opted-out repo is left completely alone, marker included: this script never
 # removes a file in a repo that has opted out of the gate.
+#
+# 2026-10-23 (Aaron): the marker moved to <repo>/.agents/plan-approved and the
+# opt-out to <repo>/.agents/no-approval-gate, part of the migration of aidata's
+# conventions to harness-neutral ~/.agents; see approval-gate.sh's note of the
+# same date.
 #
 # It skips subagent completions, which is the whole reason this is a script
 # rather than an inline `rm -f`. The hooks docs say a configured Stop hook is
@@ -30,14 +35,14 @@
 set -euo pipefail
 
 PROJECT_DIR="${1:-$PWD}"
-MARKER="$PROJECT_DIR/.claude/plan-approved"
+MARKER="$PROJECT_DIR/.agents/plan-approved"
 
 INPUT="$(cat)"
 
 # The opt-out is checked only after stdin is drained: exiting first would close
 # the pipe mid-write and could surface a spurious hook error in exactly the
 # repos that asked not to be gated. It removes nothing on the way out.
-if [ -f "$PROJECT_DIR/.claude/no-approval-gate" ]; then
+if [ -f "$PROJECT_DIR/.agents/no-approval-gate" ]; then
   exit 0
 fi
 
