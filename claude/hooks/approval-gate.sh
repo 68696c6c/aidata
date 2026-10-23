@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Approval gate (Aaron, 2026-08-12; spawn-gate model 2026-08-20): tools that
-# CHANGE things are DENIED in the MAIN session unless .claude/plan-approved
-# exists. Aaron arms the gate after approving a plan (`touch
-# .claude/plan-approved`); disarm-gate.sh, wired to the Stop hook, removes the
-# marker when the turn ends, so approval never outlives the turn.
+# CHANGE things are DENIED in the MAIN session unless .agents/plan-approved
+# exists. Aaron arms the gate after approving a plan (`mkdir -p .agents &&
+# touch .agents/plan-approved`); disarm-gate.sh, wired to the Stop hook,
+# removes the marker when the turn ends, so approval never outlives the turn.
 #
 # Canonical copy lives in aidata (claude/hooks/approval-gate.sh) and is
 # symlinked to ~/.claude/hooks/approval-gate.sh by its install.sh. The wiring
@@ -20,7 +20,7 @@
 # staying open.
 #
 # 2026-08-31 (Aaron): the gate is user-global by default, with a per-repo
-# opt-out — a repo whose root holds .claude/no-approval-gate is exempt and the
+# opt-out — a repo whose root holds .agents/no-approval-gate is exempt and the
 # gate returns without deciding anything, allow or deny.
 #
 # 2026-09-08 (Aaron): the main session is the ORCHESTRATOR ONLY. It never
@@ -36,7 +36,7 @@
 #
 # 2026-09-08 (Aaron), the PLAN FILE rule: an armed marker alone no longer
 # authorizes a write-capable Agent spawn. The spawn prompt has to name a plan
-# file under $HOME/.claude/plans/<project>/, one directory per project (see the
+# file under $HOME/.agents/plans/<project>/, one directory per project (see the
 # follow-up below), and the gate reads that file. It requires all eight
 # sections as `## ` headings (Goal, Out of scope, Design fit, Decisions, New
 # surface, Steps, Verification, Fallback), at least 40 non-whitespace
@@ -48,9 +48,9 @@
 # alternatives into a place a reviewer reads before arming. The rule is global
 # and project-agnostic: every repo the gate covers resolves its own plans
 # directory from its own root. Because the main session has to write the plan
-# it will later cite, $HOME/.claude/plans/ joins the memory directory and the
+# it will later cite, $HOME/.agents/plans/ joins the memory directory and the
 # session scratchpad as an allowed write location. Template:
-# $HOME/.claude/plans/TEMPLATE.md.
+# $HOME/.agents/plans/TEMPLATE.md.
 #
 # 2026-09-08 (Aaron), plan-rule follow-ups from the first hours under it,
 # three fixes. First, the template no longer tells an author to write "None."
@@ -60,7 +60,7 @@
 # resolved, the way the scratchpad and plans paths already were; the memory
 # pattern's * spans slashes, so a traversal through it reached any file on
 # disk. Third, a spawn prompt may name a plan under any
-# $HOME/.claude/plans/<name>/ directory and not only the session project's
+# $HOME/.agents/plans/<name>/ directory and not only the session project's
 # own, because a plan lives with the project the change belongs to, which is
 # often not the project the orchestrating session runs in. The shape,
 # freshness and ".." checks are identical wherever the plan lives, and those
@@ -80,6 +80,13 @@
 # path (it is a symlink into the aidata checkout), with ~/.claude/hooks/gate/
 # as fallback; a missing or failing script fails CLOSED.
 #
+# 2026-10-23 (Aaron): the conventions moved to harness-neutral ground. The
+# armed marker is now <repo>/.agents/plan-approved, the per-repo opt-out is
+# <repo>/.agents/no-approval-gate, and the plans root is $HOME/.agents/plans.
+# ~/.claude/plans and ~/.claude/review survive as permanent compat symlinks
+# into ~/.agents, owned by aidata's install.sh, so anything still hardcoding
+# the old path keeps working.
+#
 # The gate enforces plan approval before CHANGES and nothing else — reading
 # is never gated (Aaron, 2026-08-13). Fail-closed on the write side: while
 # disarmed, Bash is limited to a read-only allowlist of simple commands, and
@@ -89,14 +96,14 @@ set -euo pipefail
 set -f # no pathname expansion while word-splitting command segments
 
 PROJECT_DIR="${1:-$PWD}"
-MARKER="$PROJECT_DIR/.claude/plan-approved"
+MARKER="$PROJECT_DIR/.agents/plan-approved"
 
 # Plans live in per-project directories inside the user-global plans root. The
 # session project's own directory is the default a denial points at, and a
 # spawn may cite a plan under any project directory there, since the change
 # often belongs to another repo (the 2026-09-08 follow-up above).
 PROJECT_NAME="$(basename "$PROJECT_DIR")"
-PLANS_ROOT="$HOME/.claude/plans"
+PLANS_ROOT="$HOME/.agents/plans"
 PLAN_DIR="$PLANS_ROOT/$PROJECT_NAME"
 PLAN_TEMPLATE="$PLANS_ROOT/TEMPLATE.md"
 
@@ -121,7 +128,7 @@ INPUT="$(cat)"
 # the pipe mid-write and could surface a spurious hook error in exactly the
 # repos that asked not to be gated. Everything below — the allow paths and the
 # deny paths alike — is skipped for an exempt repo.
-if [ -f "$PROJECT_DIR/.claude/no-approval-gate" ]; then
+if [ -f "$PROJECT_DIR/.agents/no-approval-gate" ]; then
   exit 0
 fi
 
@@ -142,7 +149,7 @@ deny() {
   # first word, a subagent_type), and hand-rolled JSON around it fails OPEN —
   # a bare backslash makes the output unparseable and the harness then ALLOWS
   # the call (found live 2026-08-31: '\mkdir x' sailed through the allowlist).
-  jq -cn --arg r "APPROVAL GATE (disarmed): $1. Present the plan and ask Aaron to arm the gate with: ! touch .claude/plan-approved — it disarms when the turn ends. Do not reshape the call to bypass the gate." \
+  jq -cn --arg r "APPROVAL GATE (disarmed): $1. Present the plan and ask Aaron to arm the gate with: ! mkdir -p .agents && touch .agents/plan-approved — it disarms when the turn ends. Do not reshape the call to bypass the gate." \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
   exit 0
 }
@@ -312,7 +319,7 @@ check_plan_file() {
   # it. The project segment is any name (the 2026-09-08 follow-up), so the
   # ".." refusal in the shared checker is what keeps the cited plan inside
   # the plans root.
-  plan_re="($(re_escape "$HOME")|~)/\\.claude/plans/[^[:space:]/]+/[^[:space:]/]+\\.md"
+  plan_re="($(re_escape "$HOME")|~)/\\.agents/plans/[^[:space:]/]+/[^[:space:]/]+\\.md"
   plan="$(printf '%s' "$prompt" | grep -oE "$plan_re" | head -n 1 || true)"
 
   if [ -z "$plan" ]; then

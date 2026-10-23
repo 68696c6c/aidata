@@ -11,8 +11,8 @@
 #   Run it from anywhere inside the repo being reviewed.
 #
 # DOCTRINE ASSEMBLED (same layers, same order, as the reviewer role)
-#   ~/.claude/review/global.md                 always
-#   ~/.claude/review/go.md                     iff <repo-root>/go.mod exists
+#   ~/.agents/review/global.md                 always
+#   ~/.agents/review/go.md                     iff <repo-root>/go.mod exists
 #   <repo-root>/.claude/review/*.md            all of them
 #   <repo-root>/REVIEW.md                      only if .claude/review/ is absent
 #
@@ -90,13 +90,13 @@ fi
 # --- assemble doctrine -------------------------------------------------------
 
 LAYERS=()
-GLOBAL="$HOME/.claude/review/global.md"
+GLOBAL="$HOME/.agents/review/global.md"
 [ -f "$GLOBAL" ] || die "missing $GLOBAL — the global doctrine layer is mandatory"
 LAYERS+=("$GLOBAL")
 
 GO_MOD=$(find "$REPO_ROOT" -maxdepth 2 -name go.mod -not -path '*/node_modules/*' -print -quit 2>/dev/null)
-if [ -n "$GO_MOD" ] && [ -f "$HOME/.claude/review/go.md" ]; then
-  LAYERS+=("$HOME/.claude/review/go.md")
+if [ -n "$GO_MOD" ] && [ -f "$HOME/.agents/review/go.md" ]; then
+  LAYERS+=("$HOME/.agents/review/go.md")
 fi
 
 REPO_LAYER_DIR="$REPO_ROOT/.claude/review"

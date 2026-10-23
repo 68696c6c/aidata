@@ -3,8 +3,9 @@
 // Same doctrine, omp mechanics: the main session is the orchestrator. It
 // plans, delegates writes to subagents, and ships. Reading is never gated.
 // Write capability is gated behind Aaron's armed marker
-// (<repo>/.claude/plan-approved — shared with the Claude gate since
-// 2026-10-09, touched after he approves a plan, removed at
+// (<repo>/.agents/plan-approved — at <repo>/.claude/plan-approved since
+// 2026-10-09, moved to harness-neutral .agents on 2026-10-23; touched after
+// he approves a plan, removed at
 // turn end) plus a plan file carrying the required shape, and shipping
 // (git push, gh pr create/merge) additionally requires the pipeline
 // EXECUTED -> VERIFIED -> REVIEWED to have run in this session.
@@ -37,10 +38,10 @@ const HOME = process.env.HOME ?? "";
 const GATE_DIR = `${HOME}/.omp/agent/gate`;
 const SCAN_BASH = `${GATE_DIR}/scan-bash.sh`;
 const CHECK_PLAN = `${GATE_DIR}/check-plan.sh`;
-const PLANS_ROOT = `${HOME}/.claude/plans`;
+const PLANS_ROOT = `${HOME}/.agents/plans`;
 // Shared with the Claude approval gate since 2026-10-09: one marker per repo,
 // whichever harness you arm it for. Either harness's turn end disarms it.
-const MARKER_REL = ".claude/plan-approved";
+const MARKER_REL = ".agents/plan-approved";
 
 // The unit of spawn approval: these roles never mutate, so they launch
 // without the marker. Everything else — task, sonic, executor, the ported
@@ -261,7 +262,7 @@ function creditOf(agent: string): PipeRole | null {
   return "executor";
 }
 
-const PLAN_PATH_RE = /(?:~|\/[^\s"']+)\/\.claude\/plans\/[^\s/]+\/[^\s/]+\.md/;
+const PLAN_PATH_RE = /(?:~|\/[^\s"']+)\/\.agents\/plans\/[^\s/]+\/[^\s/]+\.md/;
 
 function extractPlanPath(text: string): string | null {
   const m = text.match(PLAN_PATH_RE);
@@ -274,7 +275,7 @@ function block(reason: string): { block: true; reason: string } {
   return { block: true, reason };
 }
 
-const ARM_HINT = `Present the plan and ask Aaron to arm the gate (touch .claude/plan-approved) — it disarms when the turn ends. Do not reshape the call to bypass the gate.`;
+const ARM_HINT = `Present the plan and ask Aaron to arm the gate (mkdir -p .agents && touch .agents/plan-approved) — it disarms when the turn ends. Do not reshape the call to bypass the gate.`;
 
 // Env-gated debug log: OMP_GATE_DEBUG=1 records lifecycle and gating
 // decisions to /tmp/gate-debug.log. Off by default; never throws.

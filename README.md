@@ -15,9 +15,9 @@ Hand-rolled shell and symlinks. No Dotbot, no framework, no dependencies beyond
 |---|---|---|
 | `CLAUDE.md` | `~/Code/CLAUDE.md` | link |
 | `settings.local.json` | `~/Code/.claude/settings.local.json` | link |
-| `claude/review/global.md` | `~/.claude/review/global.md` | link |
-| `claude/review/go.md` | `~/.claude/review/go.md` | link |
-| `claude/review/review.sh` | `~/.claude/review/review.sh` | link |
+| `claude/review/global.md` | `~/.agents/review/global.md` | link |
+| `claude/review/go.md` | `~/.agents/review/go.md` | link |
+| `claude/review/review.sh` | `~/.agents/review/review.sh` | link |
 | `claude/hooks/approval-gate.sh` | `~/.claude/hooks/approval-gate.sh` | link |
 | `claude/hooks/disarm-gate.sh` | `~/.claude/hooks/disarm-gate.sh` | link |
 | `claude/claude-md.d/*.md` (each) | `~/.claude/CLAUDE.md` | block |
@@ -95,7 +95,7 @@ hold a turn. macOS only — they shell out to `afplay`, and fail silently
 unless the current repo is armed. Reading is never gated.
 
 ```sh
-touch .claude/plan-approved      # arm, from the repo root — lasts ONE turn
+mkdir -p .agents && touch .agents/plan-approved   # arm, from the repo root — lasts ONE turn
 ```
 
 The `Stop` hook (`disarm-gate.sh`) removes the marker when the turn ends, so an
@@ -111,7 +111,7 @@ never depends on the main thread staying open.
 **Per-repo opt-out.** A repo that should not be gated says so in its own root:
 
 ```sh
-touch .claude/no-approval-gate   # this repo is exempt, permanently
+touch .agents/no-approval-gate   # this repo is exempt, permanently
 ```
 
 Both scripts return immediately for such a repo, deciding nothing — and
@@ -122,11 +122,42 @@ in the hook's `args` (the exec form: each element is passed as one argument with
 no shell quoting), which is what lets one user-global script gate whichever repo
 the session started in.
 
+## Session artifacts: ~/.agents
+
+aidata-owned conventions that belong to no single harness live under
+`~/.agents/`, harness-neutral ground shared by Claude Code and omp:
+
+```
+~/.agents/
+  plans/<project>/YYYY-MM-DD-<type>-<slug>.md   # plans (bare slug), handoffs, notes
+  plans/TEMPLATE.md                             # the gate's plan template
+  review/                                       # global.md, go.md, review.sh
+<repo>/.agents/plan-approved                    # armed marker (both gates)
+<repo>/.agents/no-approval-gate                 # per-repo opt-out
+```
+
+`install.sh` owns the whole surface: it creates `~/.agents/plans` and
+`~/.agents/review`, migrates any pre-existing `~/.claude/plans` or
+`~/.claude/review` content into them (a real directory moves wholesale into an
+empty target; if BOTH sides hold content it warns and refuses to merge: user
+data is never merged silently), and leaves the two permanent compat symlinks
+`~/.claude/plans` and `~/.claude/review` pointing into `~/.agents` so anything
+still hardcoding the old path keeps working. It also appends
+`**/.agents/plan-approved` and `**/.agents/no-approval-gate` to the global git
+excludesfile (`~/.config/git/ignore`, created if absent), so the per-repo
+markers can never be committed in any repo, including repos that track a
+`.agents/` directory of their own.
+
+The review doctrine links in the table above point into `~/.agents/review`
+directly; editing through the `~/.claude/review` compat symlink reaches the
+same inodes.
+
 ## Editing doctrine
 
-The linked files are symlinks, so editing `~/.claude/review/go.md` and editing
-`claude/review/go.md` are the same edit to the same inode. Work wherever is
-convenient, then commit from the repo:
+The linked files are symlinks, so editing `~/.agents/review/go.md` and editing
+`claude/review/go.md` are the same edit to the same inode (the old
+`~/.claude/review` path reaches it too, through the compat symlink). Work
+wherever is convenient, then commit from the repo:
 
 ```sh
 cd ~/Code/aidata && git add claude/review/go.md && git commit
@@ -150,7 +181,7 @@ and nothing under `~/.claude/` changes when omp is installed or removed.
 
 What the two harnesses share is the doctrine, and only in the reviewers. Both
 a Claude `reviewer` and an omp `reviewer` load the same
-`~/.claude/review/global.md`, the same language layer (`go.md`), and the same
+`~/.agents/review/global.md`, the same language layer (`go.md`), and the same
 `<repo-root>/.claude/review/*.md`. Those paths are aidata symlinks and stay
 readable whether or not Claude Code is running. The two `verifier` roles share
 one body and contract and load no review layer by design:
@@ -237,12 +268,13 @@ probed live 2026-09-18):
   artifact directory), so a classification failure degrades toward gating.
 - **`turn_end` fires per model step, not per user turn** — the disarm lives
   on `agent_end` (the Stop-hook analog) with `session_shutdown` as backstop.
-  The marker is `<repo>/.claude/plan-approved` — shared with the Claude gate
-  since 2026-10-09: one file per repo, arm once with
-  `touch .claude/plan-approved` and whichever harness you run is armed;
-  either harness's turn end disarms it.
+  The marker is `<repo>/.agents/plan-approved` — shared with the Claude gate
+  since 2026-10-09 (at `.claude/plan-approved` until the 2026-10-23 move to
+  harness-neutral `.agents`): one file per repo, arm once with
+  `mkdir -p .agents && touch .agents/plan-approved` and whichever harness you
+  run is armed; either harness's turn end disarms it.
 - **The main session is the orchestrator.** Reads flow; write/edit are
-  refused except under `~/.claude/plans/` (the shared plans root — a plan
+  refused except under `~/.agents/plans/` (the shared plans root — a plan
   belongs to the project, not the harness); `eval` is refused outright (a
   full runtime defeats command scanning, and eval-prelude bridges like
   `tab.run` never emit hook events); bash is scanned (`--disarmed` read-only
@@ -346,7 +378,7 @@ review.sh --help                 # vendor examples and exit codes
 ```
 
 Run it from anywhere inside the repo under review. It assembles
-`~/.claude/review/global.md`, the language layer (`go.md` when the repo has a
+`~/.agents/review/global.md`, the language layer (`go.md` when the repo has a
 `go.mod`), and the repo's own `.claude/review/*.md`.
 
 Vendor inversion in an omp project: there Kimi K3 is the model doing the

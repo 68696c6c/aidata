@@ -36,8 +36,8 @@ verdict_e2e() {
   local mode="$1" raw="$2" proj out
   proj="$WORK/proj"
   rm -rf "$proj"
-  mkdir -p "$proj/.claude"
-  [ "$mode" = "armed" ] && touch "$proj/.claude/plan-approved"
+  mkdir -p "$proj/.agents"
+  [ "$mode" = "armed" ] && touch "$proj/.agents/plan-approved"
   out="$(jq -cn --arg c "$(printf '%b' "$raw")" '{tool_name:"Bash",tool_input:{command:$c}}' \
     | bash "$GATE_HOOK" "$proj" 2>/dev/null || true)"
   if printf '%s' "$out" | grep -q '"deny"'; then
