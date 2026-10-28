@@ -1,2 +1,2 @@
 model: "@mech"
-tools: read, write, edit, bash, grep, glob, web_search, todo
+tools: read, write, edit, bash, grep, glob, web_search, todo, recall, retain, reflect

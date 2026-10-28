@@ -1,2 +1,2 @@
 model: "@verify, fireworks/kimi-k3"
-tools: read, grep, glob, bash
+tools: read, grep, glob, bash, recall
