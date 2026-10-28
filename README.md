@@ -275,8 +275,9 @@ probed live 2026-09-18):
   run is armed; either harness's turn end disarms it.
 - **The main session is the orchestrator.** Reads flow; write/edit are
   refused except under `~/.agents/plans/` (the shared plans root — a plan
-  belongs to the project, not the harness); the `xd://` memory devices
-  (`recall`, `retain`, `reflect`) are allowed in every gate state, mirroring
+  belongs to the project, not the harness); the memory tools `recall`,
+  `retain` and `reflect` are allowed in every gate state, both as
+  first-class tool calls and as `xd://` device writes, mirroring
   the Claude gate's carve-out that lets the main session write its own
   memory even disarmed (approval-gate.sh; widening ruled by Aaron
   2026-10-28); `eval` is refused outright (a

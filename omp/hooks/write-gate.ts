@@ -81,14 +81,17 @@ const READ_ONLY_LSP_ACTIONS: Record<string, true> = {
   capabilities: true,
 };
 
-// Memory devices the main session may use even while disarmed. Gate
+// Memory vocabulary the main session may use even while disarmed. Gate
 // widening ruled by Aaron in-thread 2026-10-28 ("we want this to work the
 // same in OMP and claude"): this mirrors the Claude gate's memory-dir
 // carve-out, where the main session writes its own memory even disarmed
 // (approval-gate.sh). Upstream classifies retain as approval="read" (omp
 // docs tools/retain.md), so the platform itself does not treat these as
-// mutations. The carve-out also unblocks recall, a read dispatched through
-// the write tool.
+// mutations. This one set is the single declaration for both dispatch
+// paths: the first-class recall/retain/reflect tools omp exposes when
+// memory.backend is hindsight (checked ahead of the main-session switch),
+// and xd:// writes (the write/edit branch below), where the carve-out also
+// unblocks recall, a read dispatched through the write tool.
 const MEMORY_DEVICES: Record<string, true> = {
   recall: true,
   retain: true,
@@ -371,6 +374,12 @@ export default function (pi: HookAPI): void {
     const marker = `${ctx.cwd}/${MARKER_REL}`;
     const armed = existsSync(marker);
 
+    // Memory tools by name: same carve-out as the xd:// device branch, in
+    // both gate states. MEMORY_DEVICES is the single declaration for both
+    // dispatch paths; without this check the disarmed fail-closed default
+    // would block recall, a read.
+    if (tool in MEMORY_DEVICES) return undefined;
+
     switch (tool) {
       // Reading is never gated.
       case "read":
@@ -379,16 +388,6 @@ export default function (pi: HookAPI): void {
       case "todo":
       case "web_search":
       case "ask":
-        return undefined;
-
-      // Memory tools by name: same carve-out as the xd:// device branch
-      // (see MEMORY_DEVICES), in both gate states. omp exposes recall,
-      // retain and reflect as first-class tools when memory.backend is
-      // hindsight, so the switch must allow them or the disarmed
-      // fail-closed default blocks a read.
-      case "recall":
-      case "retain":
-      case "reflect":
         return undefined;
 
       // A general-purpose runtime cannot be scanned, so the orchestrator
@@ -404,6 +403,7 @@ export default function (pi: HookAPI): void {
         if (p.startsWith("xd://")) {
           const device = p.slice("xd://".length);
           if (device === "report_issue") return undefined;
+          // Same single declaration as the tool-name check above the switch.
           if (device in MEMORY_DEVICES) return undefined;
           if (device === "lsp") {
             let action = "";
