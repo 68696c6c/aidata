@@ -275,7 +275,11 @@ probed live 2026-09-18):
   run is armed; either harness's turn end disarms it.
 - **The main session is the orchestrator.** Reads flow; write/edit are
   refused except under `~/.agents/plans/` (the shared plans root — a plan
-  belongs to the project, not the harness); `eval` is refused outright (a
+  belongs to the project, not the harness); the `xd://` memory devices
+  (`recall`, `retain`, `reflect`) are allowed in every gate state, mirroring
+  the Claude gate's carve-out that lets the main session write its own
+  memory even disarmed (approval-gate.sh; widening ruled by Aaron
+  2026-10-28); `eval` is refused outright (a
   full runtime defeats command scanning, and eval-prelude bridges like
   `tab.run` never emit hook events); bash is scanned (`--disarmed` read-only
   allowlist, or `--orchestrator` when armed); write-capable spawns require
