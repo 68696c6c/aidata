@@ -310,6 +310,7 @@ install_omp() {
   fi
 
   mkdir -p "$omp_home/extensions"
+  link_managed "$REPO/omp/extensions/arm-gate.ts" "$omp_home/extensions/arm-gate.ts"
   link_managed "$REPO/omp/extensions/bell.ts" "$omp_home/extensions/bell.ts"
   link_managed "$REPO/omp/extensions/hindsight.ts" "$omp_home/extensions/hindsight.ts"
 
@@ -428,6 +429,8 @@ install_hindsight() {
 # assets keep resolving (omp serves them as skill://<name>/<path>). Both links
 # point at the repo, so the two harnesses read one file on disk. Adding a
 # skill is dropping a directory in skills/ and re-running install.sh.
+# Exception: skills/approved links into ~/.claude/skills/ only (omp arming is
+# the arm-gate extension's /approved command; see the skip in install_skills).
 
 install_skills() {
   local skill name
@@ -440,6 +443,12 @@ install_skills() {
 
     mkdir -p "$claude_skills"
     link_managed_dir "${skill%/}" "$claude_skills/$name"
+
+    # approved is Claude-only: omp gets /approved from the arm-gate
+    # extension, and omp's skill loader neither runs the bang-injection
+    # marker line nor honors kebab-case disable-model-invocation, so linked
+    # in, the skill would sit model-visible with a false "Gate armed" body.
+    [ "$name" = approved ] && continue
 
     if [ -d "$omp_home" ]; then
       mkdir -p "$omp_home/skills"

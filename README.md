@@ -27,7 +27,7 @@ Hand-rolled shell and symlinks. No Dotbot, no framework, no dependencies beyond
 | `agents/<role>.md` + `agents/<role>.omp.fm` | `~/.omp/agent/agents/<role>.md` | generated |
 | `omp/config.yml` | `~/.omp/agent/config.yml` | link |
 | `skills/<name>/` (each) | `~/.claude/skills/<name>/` | link (whole dir) |
-| `skills/<name>/` (each) | `~/.omp/agent/skills/<name>/` | link (whole dir) |
+| `skills/<name>/` (each except `approved`, which is Claude-only) | `~/.omp/agent/skills/<name>/` | link (whole dir) |
 
 Five mechanisms, five different ownership rules:
 
@@ -94,9 +94,10 @@ hold a turn. macOS only — they shell out to `afplay`, and fail silently
 **Approval gate.** Tools that *change* things are denied in the main session
 unless the current repo is armed. Reading is never gated.
 
-```sh
-mkdir -p .agents && touch .agents/plan-approved   # arm, from the repo root — lasts ONE turn
-```
+Type `/approved` to arm: the skill (omp: extension) runs
+`mkdir -p .agents && touch .agents/plan-approved` in the session cwd and
+wakes the agent with the execute instruction: one keystroke, lasting ONE
+turn.
 
 The `Stop` hook (`disarm-gate.sh`) removes the marker when the turn ends, so an
 approval never outlives the turn it was given for. While disarmed, `Write` /
@@ -202,7 +203,8 @@ re-run `./install.sh`, and both `~/.claude/agents/<role>.md` and
 Claude-only (`Explore`, `scout`): omp ships its own bundled `scout`, which
 this deliberately does not shadow.
 
-What aidata manages here beyond the roles: `omp/extensions/bell.ts` and
+What aidata manages here beyond the roles: `omp/extensions/arm-gate.ts`,
+`omp/extensions/bell.ts`, and
 `omp/extensions/hindsight.ts` into
 `~/.omp/agent/extensions/`, two shared gate scripts into
 `~/.omp/agent/gate/`, and one GENERATED hook stub at
@@ -270,9 +272,9 @@ probed live 2026-09-18):
   on `agent_end` (the Stop-hook analog) with `session_shutdown` as backstop.
   The marker is `<repo>/.agents/plan-approved` — shared with the Claude gate
   since 2026-10-09 (at `.claude/plan-approved` until the 2026-10-23 move to
-  harness-neutral `.agents`): one file per repo, arm once with
-  `mkdir -p .agents && touch .agents/plan-approved` and whichever harness you
-  run is armed; either harness's turn end disarms it.
+  harness-neutral `.agents`): one file per repo, arm once with `/approved`
+  and whichever harness you run is armed; either harness's turn end disarms
+  it.
 - **The main session is the orchestrator.** Reads flow; write/edit are
   refused except under `~/.agents/plans/` (the shared plans root — a plan
   belongs to the project, not the harness); `eval` is refused outright (a
