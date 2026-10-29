@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Approval gate (Aaron, 2026-08-12; spawn-gate model 2026-08-20): tools that
 # CHANGE things are DENIED in the MAIN session unless .agents/plan-approved
-# exists. Aaron arms the gate after approving a plan (`mkdir -p .agents &&
-# touch .agents/plan-approved`); disarm-gate.sh, wired to the Stop hook,
-# removes the marker when the turn ends, so approval never outlives the turn.
+# exists. Aaron arms the gate after approving a plan (/approved, or by hand:
+# `mkdir -p .agents && touch .agents/plan-approved`); disarm-gate.sh, wired
+# to the Stop hook, removes the marker when the turn ends, so approval never
+# outlives the turn.
 #
 # Canonical copy lives in aidata (claude/hooks/approval-gate.sh) and is
 # symlinked to ~/.claude/hooks/approval-gate.sh by its install.sh. The wiring
@@ -149,7 +150,7 @@ deny() {
   # first word, a subagent_type), and hand-rolled JSON around it fails OPEN —
   # a bare backslash makes the output unparseable and the harness then ALLOWS
   # the call (found live 2026-08-31: '\mkdir x' sailed through the allowlist).
-  jq -cn --arg r "APPROVAL GATE (disarmed): $1. Present the plan and ask Aaron to arm the gate with: ! mkdir -p .agents && touch .agents/plan-approved — it disarms when the turn ends. Do not reshape the call to bypass the gate." \
+  jq -cn --arg r "APPROVAL GATE (disarmed): $1. Present the plan and ask Aaron to arm the gate with /approved (fallback: ! mkdir -p .agents && touch .agents/plan-approved). It disarms when the turn ends. Do not reshape the call to bypass the gate." \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
   exit 0
 }

@@ -275,7 +275,7 @@ function block(reason: string): { block: true; reason: string } {
   return { block: true, reason };
 }
 
-const ARM_HINT = `Present the plan and ask Aaron to arm the gate (mkdir -p .agents && touch .agents/plan-approved) — it disarms when the turn ends. Do not reshape the call to bypass the gate.`;
+const ARM_HINT = `Present the plan and ask Aaron to arm the gate with /approved (fallback: mkdir -p .agents && touch .agents/plan-approved). It disarms when the turn ends. Do not reshape the call to bypass the gate.`;
 
 // Env-gated debug log: OMP_GATE_DEBUG=1 records lifecycle and gating
 // decisions to /tmp/gate-debug.log. Off by default; never throws.
